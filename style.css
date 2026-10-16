@@ -1,6 +1,6 @@
 /* ==========================================================================
    EPITA Smart Classroom — Stylesheet
-   Auteur : Omar CORTY - EPITA GITM
+   Auteure : Maïwenn Foucher - EPITA GITM
    Thème : Moderne, épuré, inspiration ingénierie EPITA & Edge AI
    ========================================================================== */
 
@@ -112,9 +112,13 @@ body {
     display: block;
     width: 100%;
     height: auto;
+    min-height: 240px;          /* Safari: évite la hauteur 0 avant que le flux soit prêt */
     max-height: 520px;
     object-fit: contain;
     background-color: #000;
+    position: relative;
+    z-index: 1;                 /* Sous le canvas overlay */
+    -webkit-transform: translateZ(0); /* Force GPU compositing sur Safari */
 }
 
 /* Canvas superposé exactement sur la vidéo */
@@ -124,8 +128,9 @@ body {
     left: 0;
     width: 100%;
     height: 100%;
-    pointer-events: none; /* Ne bloque pas les clics si besoin */
+    pointer-events: none;
     z-index: 5;
+    background: transparent;   /* Explicitement transparent pour Safari */
 }
 
 /* Écran de veille / Standby lorsque la caméra est arrêtée */

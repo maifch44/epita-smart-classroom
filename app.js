@@ -1,7 +1,7 @@
 /**
  * ============================================================================
  * EPITA Smart Classroom — Application Logic
- * Auteur : Omar CORTY - EPITA GITM
+ * Auteure : Maïwenn Foucher - EPITA GITM
  * Module : AI for Project Management (ING3)
  * Vision IA : TensorFlow.js & COCO-SSD
  * ============================================================================
@@ -211,6 +211,12 @@ const DOM = {
     btnDownloadReport: document.getElementById('btnDownloadReport'),
     btnPrintReport: document.getElementById('btnPrintReport'),
     
+    // Importation fichier (photo / vidéo)
+    fileImportInput: document.getElementById('fileImportInput'),
+    btnImportFile: document.getElementById('btnImportFile'),
+    btnClearImport: document.getElementById('btnClearImport'),
+    importedImage: document.getElementById('importedImage'),
+
     // Alertes
     alertContainer: document.getElementById('alertContainer')
 };
@@ -279,6 +285,11 @@ function setupEventListeners() {
     DOM.btnDownloadReport.addEventListener('click', downloadReportFile);
     DOM.btnPrintReport.addEventListener('click', () => window.print());
 
+    // Bouton import photo / vidéo
+    DOM.btnImportFile.addEventListener('click', () => DOM.fileImportInput.click());
+    DOM.fileImportInput.addEventListener('change', handleFileImport);
+    DOM.btnClearImport.addEventListener('click', clearImportedMedia);
+
     // Ajustement dynamique du canvas lors du redimensionnement de la fenêtre
     window.addEventListener('resize', syncCanvasDimensions);
 }
@@ -298,10 +309,11 @@ async function loadCocoSsdModel() {
         AppState.isModelLoading = false;
         updateModelStatus('ready', 'Modèle COCO-SSD prêt');
         
-        // Activer les boutons de démarrage
+        // Activer les boutons de démarrage et d'import
         DOM.btnStartCamera.disabled = false;
         DOM.btnStartCameraOverlay.disabled = false;
         DOM.overlayBtnSpinner.classList.add('d-none');
+        DOM.btnImportFile.disabled = false;
         
     } catch (error) {
         console.error('Erreur lors du chargement de COCO-SSD :', error);
@@ -386,20 +398,34 @@ async function startCamera() {
 
         const stream = await navigator.mediaDevices.getUserMedia(constraints);
         AppState.mediaStream = stream;
-        DOM.webcam.srcObject = stream;
 
-        // Attendre que les métadonnées de la vidéo soient chargées
-        await new Promise((resolve) => {
-            DOM.webcam.onloadedmetadata = () => {
-                DOM.webcam.play();
+        // Safari: set srcObject then force play after loadeddata (not loadedmetadata)
+        DOM.webcam.srcObject = stream;
+        DOM.webcam.setAttribute('playsinline', '');
+        DOM.webcam.setAttribute('webkit-playsinline', '');
+        DOM.webcam.muted = true;
+
+        // Attendre que la vidéo ait ses vraies dimensions (loadeddata plus fiable que loadedmetadata sur Safari)
+        await new Promise((resolve, reject) => {
+            const timeout = setTimeout(() => reject(new Error('Timeout vidéo')), 10000);
+            DOM.webcam.onloadeddata = async () => {
+                clearTimeout(timeout);
+                try { await DOM.webcam.play(); } catch(e) { /* autoplay policy */ }
                 resolve();
             };
+            DOM.webcam.onerror = () => { clearTimeout(timeout); reject(new Error('Erreur flux vidéo')); };
         });
+
+        // Forcer la visibilité de la vidéo (Safari ne redimensionne pas automatiquement)
+        DOM.webcam.style.display = 'block';
+        DOM.webcam.style.width = '100%';
+        DOM.webcam.style.height = 'auto';
 
         AppState.isStreaming = true;
         AppState.isFrozen = false;
 
-        // Ajuster la taille du canvas
+        // Synchroniser le canvas après un court délai pour que Safari ait bien les dimensions
+        await new Promise(r => setTimeout(r, 150));
         syncCanvasDimensions();
 
         // Mettre à jour l'interface
@@ -484,6 +510,144 @@ function stopCamera() {
     updateDashboard();
 }
 
+// ============================================================================
+// IMPORT PHOTO / VIDÉO (Fonctionnalité ajoutée)
+// ============================================================================
+
+/**
+ * Gère l'import d'une image ou vidéo locale et lance la détection dessus
+ */
+async function handleFileImport(e) {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    if (!AppState.model) {
+        showAlert('Modèle IA non encore chargé. Patientez.', 'warning', 3000);
+        return;
+    }
+
+    const isImage = file.type.startsWith('image/');
+    const isVideo = file.type.startsWith('video/');
+
+    if (!isImage && !isVideo) {
+        showAlert('Format non supporté. Importez une image (JPG, PNG, WEBP) ou une vidéo (MP4, MOV, WEBM).', 'danger', 4000);
+        return;
+    }
+
+    // Arrêter la caméra si elle tourne
+    if (AppState.isStreaming) stopCamera();
+
+    const objectUrl = URL.createObjectURL(file);
+    clearCanvas();
+
+    if (isImage) {
+        // --- Cas IMAGE ---
+        DOM.webcam.style.display = 'none';
+        DOM.importedImage.style.display = 'block';
+        DOM.importedImage.src = objectUrl;
+
+        await new Promise((resolve) => {
+            DOM.importedImage.onload = resolve;
+        });
+
+        // Synchroniser canvas sur les dimensions de l'image affichée
+        const rect = DOM.importedImage.getBoundingClientRect();
+        DOM.canvas.width = DOM.importedImage.naturalWidth;
+        DOM.canvas.height = DOM.importedImage.naturalHeight;
+
+        // Lancer la détection sur l'image
+        const predictions = await AppState.model.detect(DOM.importedImage);
+        const filtered = predictions.filter(p => p.score >= AppState.confidenceThreshold);
+        AppState.latestPredictions = filtered;
+        processAndRenderPredictions(filtered);
+
+        DOM.cameraStandbyScreen.style.display = 'none';
+        DOM.btnClearImport.classList.remove('d-none');
+        DOM.btnClearImport.classList.add('d-inline-flex');
+        showAlert(`Image importée. ${filtered.length} objet(s) détecté(s) avec le seuil actuel.`, 'success', 3000);
+
+    } else if (isVideo) {
+        // --- Cas VIDÉO ---
+        DOM.importedImage.style.display = 'none';
+        DOM.webcam.style.display = 'block';
+        DOM.webcam.srcObject = null;
+        DOM.webcam.src = objectUrl;
+        DOM.webcam.loop = true;
+        DOM.webcam.muted = true;
+        DOM.webcam.setAttribute('playsinline', '');
+        DOM.webcam.setAttribute('webkit-playsinline', '');
+
+        await new Promise((resolve) => {
+            DOM.webcam.onloadeddata = async () => {
+                try { await DOM.webcam.play(); } catch(e) {}
+                resolve();
+            };
+        });
+
+        await new Promise(r => setTimeout(r, 150));
+        syncCanvasDimensions();
+
+        AppState.isStreaming = true;
+        AppState.isFrozen = false;
+        DOM.cameraStandbyScreen.style.display = 'none';
+        DOM.liveFeedTag.classList.remove('d-none');
+        DOM.liveFeedTag.classList.add('d-flex');
+        DOM.btnStopCamera.disabled = false;
+        DOM.btnFreezeFrame.disabled = false;
+        DOM.btnClearImport.classList.remove('d-none');
+        DOM.btnClearImport.classList.add('d-inline-flex');
+
+        DOM.cameraStatusBadge.className = 'badge bg-info-subtle text-info border border-info-subtle d-flex align-items-center gap-1 px-3 py-2';
+        DOM.cameraStatusBadge.innerHTML = `<i class="bi bi-film"></i> <span>Vidéo importée</span>`;
+
+        AppState.lastFpsUpdateTime = performance.now();
+        AppState.frameCount = 0;
+        requestAnimationFrame(detectionLoop);
+
+        showAlert('Vidéo importée. Détection IA en cours sur le fichier.', 'info', 3000);
+    }
+
+    // Réinitialiser le champ file pour permettre de réimporter le même fichier
+    DOM.fileImportInput.value = '';
+}
+
+/**
+ * Supprime le média importé et revient à l'écran d'attente
+ */
+function clearImportedMedia() {
+    // Arrêter la vidéo importée si en cours
+    if (!DOM.webcam.srcObject && DOM.webcam.src) {
+        AppState.isStreaming = false;
+        if (AppState.animationFrameId) {
+            cancelAnimationFrame(AppState.animationFrameId);
+            AppState.animationFrameId = null;
+        }
+        DOM.webcam.pause();
+        URL.revokeObjectURL(DOM.webcam.src);
+        DOM.webcam.src = '';
+        DOM.webcam.loop = false;
+    }
+
+    DOM.importedImage.style.display = 'none';
+    DOM.importedImage.src = '';
+    DOM.webcam.style.display = 'none';
+    DOM.btnClearImport.classList.add('d-none');
+    DOM.btnClearImport.classList.remove('d-inline-flex');
+    DOM.btnStartCamera.disabled = false;
+    DOM.btnStopCamera.disabled = true;
+    DOM.btnFreezeFrame.disabled = true;
+    DOM.cameraStandbyScreen.style.display = 'flex';
+
+    DOM.cameraStatusBadge.className = 'badge bg-secondary-subtle text-secondary border d-flex align-items-center gap-1 px-3 py-2';
+    DOM.cameraStatusBadge.innerHTML = `<i class="bi bi-camera-video-off"></i> <span>Caméra arrêtée</span>`;
+
+    clearCanvas();
+    AppState.latestPredictions = [];
+    AppState.currentDetectedCounts = {};
+    updateDashboard();
+    showAlert('Média retiré. Vous pouvez démarrer la caméra ou importer un nouveau fichier.', 'secondary', 2500);
+}
+
 /**
  * Fige ou reprend le flux vidéo (capture instantanée pour audit stable)
  */
@@ -512,9 +676,18 @@ function toggleFreezeFrame() {
  * Ajuste les dimensions internes du Canvas pour correspondre à la vidéo
  */
 function syncCanvasDimensions() {
-    if (DOM.webcam.videoWidth && DOM.webcam.videoHeight) {
-        DOM.canvas.width = DOM.webcam.videoWidth;
-        DOM.canvas.height = DOM.webcam.videoHeight;
+    const vw = DOM.webcam.videoWidth;
+    const vh = DOM.webcam.videoHeight;
+    if (vw && vh) {
+        DOM.canvas.width = vw;
+        DOM.canvas.height = vh;
+    } else {
+        // Fallback: use displayed size if videoWidth not yet available (Safari edge case)
+        const rect = DOM.webcam.getBoundingClientRect();
+        if (rect.width > 0) {
+            DOM.canvas.width = rect.width;
+            DOM.canvas.height = rect.height;
+        }
     }
 }
 
