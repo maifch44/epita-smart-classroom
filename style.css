@@ -430,3 +430,52 @@ body {
     object-fit: cover;
 }
 
+/* Aperçu grand format pour média importé */
+.imported-media-large-container {
+    width: 100%;
+    min-height: 220px;
+    max-height: 380px;
+    background-color: #0b1329;
+    border-radius: 8px;
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+    border: 1px solid rgba(0, 0, 0, 0.12);
+}
+
+.imported-media-large-container img,
+.imported-media-large-container video {
+    max-width: 100%;
+    max-height: 380px;
+    object-fit: contain;
+}
+
+/* Liste détaillée d'inspection (média importé & caméra en direct) */
+.detection-detail-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.5rem 0.75rem;
+    border-radius: 6px;
+    background-color: #f8fafc;
+    border: 1px solid #e2e8f0;
+    font-size: 0.85rem;
+    transition: all 0.15s ease;
+}
+
+.detection-detail-item:hover {
+    background-color: #f1f5f9;
+    border-color: #cbd5e1;
+}
+
+.detection-score-pill {
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    font-weight: 700;
+    padding: 0.2rem 0.5rem;
+    border-radius: 9999px;
+}
+
+

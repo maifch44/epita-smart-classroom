@@ -241,6 +241,12 @@ const DOM = {
     btnReanalyzeMedia: document.getElementById('btnReanalyzeMedia'),
     importedMediaHistoryStrip: document.getElementById('importedMediaHistoryStrip'),
     importedMediaHistoryList: document.getElementById('importedMediaHistoryList'),
+    importedMediaDetectionsList: document.getElementById('importedMediaDetectionsList'),
+    importedMediaCategorySummary: document.getElementById('importedMediaCategorySummary'),
+
+    // Liste détaillée des détections temps réel caméra
+    liveDetectionsDetailList: document.getElementById('liveDetectionsDetailList'),
+    liveDetectionObjectsCount: document.getElementById('liveDetectionObjectsCount'),
 
     // Mode chaises renforcé
     enhancedChairMode: document.getElementById('enhancedChairMode'),
@@ -616,9 +622,9 @@ function formatBytes(bytes) {
 }
 
 /**
- * Met à jour la carte d'aperçu du média importé
+ * Met à jour la carte d'aperçu du média importé (Grand format et détail)
  */
-function updateImportedMediaPreviewCard(mediaItem, detectionCount) {
+function updateImportedMediaPreviewCard(mediaItem, detectionCount, predictions = []) {
     if (!DOM.importedMediaPreviewCard) return;
 
     DOM.importedMediaPreviewCard.classList.remove('d-none');
@@ -638,7 +644,57 @@ function updateImportedMediaPreviewCard(mediaItem, detectionCount) {
         DOM.importedMediaThumbImg.classList.add('d-none');
     }
 
+    // Afficher le détail des détections pour ce média
+    renderImportedMediaDetailList(predictions.length > 0 ? predictions : AppState.latestPredictions);
     renderMediaHistoryStrip();
+}
+
+/**
+ * Affiche la liste détaillée de chaque objet détecté sur le média importé
+ */
+function renderImportedMediaDetailList(predictions) {
+    if (!DOM.importedMediaDetectionsList) return;
+
+    if (!predictions || predictions.length === 0) {
+        DOM.importedMediaDetectionsList.innerHTML = '<span class="text-muted small p-2 italic">Aucun objet détecté avec le seuil actuel.</span>';
+        if (DOM.importedMediaCategorySummary) DOM.importedMediaCategorySummary.textContent = '0 catégorie';
+        return;
+    }
+
+    const categories = new Set(predictions.map(p => p.class));
+    if (DOM.importedMediaCategorySummary) {
+        DOM.importedMediaCategorySummary.textContent = `${categories.size} catégorie${categories.size > 1 ? 's' : ''} • ${predictions.length} objet${predictions.length > 1 ? 's' : ''} au total`;
+    }
+
+    let html = '';
+    const sorted = [...predictions].sort((a, b) => b.score - a.score);
+
+    sorted.forEach((p, idx) => {
+        const labelFr = COCO_TRANSLATIONS_FR[p.class] || p.class;
+        const color = CATEGORY_COLORS[p.class] || '#64748b';
+        const scorePct = Math.round(p.score * 100);
+        const [x, y, w, h] = p.bbox.map(Math.round);
+
+        let scoreClass = 'bg-success text-white';
+        if (scorePct < 60) scoreClass = 'bg-warning text-dark';
+        else if (scorePct < 80) scoreClass = 'bg-info text-dark';
+
+        html += `
+            <div class="detection-detail-item">
+                <div class="d-flex align-items-center gap-2">
+                    <span class="legend-dot" style="background-color: ${color}"></span>
+                    <strong class="text-dark">#${idx + 1} ${labelFr}</strong>
+                    ${p.originalClass && p.originalClass !== p.class ? `<span class="badge bg-secondary-subtle text-secondary fs-xs">ex-${p.originalClass}</span>` : ''}
+                </div>
+                <div class="d-flex align-items-center gap-2">
+                    <span class="text-muted font-monospace fs-xs d-none d-sm-inline">[${x}, ${y}, ${w}×${h}px]</span>
+                    <span class="detection-score-pill ${scoreClass}">${scorePct}%</span>
+                </div>
+            </div>
+        `;
+    });
+
+    DOM.importedMediaDetectionsList.innerHTML = html;
 }
 
 /**
@@ -1081,6 +1137,56 @@ function renderDetectionPills(counts, predictions) {
     });
 
     DOM.detectedItemsPills.innerHTML = html;
+
+    // Mise à jour de la liste détaillée en temps réel de chaque objet vu par la caméra
+    renderLiveDetectionsDetail(predictions);
+}
+
+/**
+ * Affiche la liste détaillée individuelle de chaque objet détecté en direct par la caméra
+ */
+function renderLiveDetectionsDetail(predictions) {
+    if (!DOM.liveDetectionsDetailList || !DOM.liveDetectionObjectsCount) return;
+
+    if (!predictions || predictions.length === 0) {
+        DOM.liveDetectionsDetailList.innerHTML = '<span class="text-muted small p-2 italic">Aucun objet détecté dans le champ avec le seuil actuel.</span>';
+        DOM.liveDetectionObjectsCount.textContent = '0 objet';
+        return;
+    }
+
+    DOM.liveDetectionObjectsCount.textContent = `${predictions.length} objet${predictions.length > 1 ? 's' : ''}`;
+
+    let html = '';
+    // Trier par score décroissant pour mettre en avant les plus certains
+    const sorted = [...predictions].sort((a, b) => b.score - a.score);
+
+    sorted.forEach((p, index) => {
+        const labelFr = COCO_TRANSLATIONS_FR[p.class] || p.class;
+        const color = CATEGORY_COLORS[p.class] || '#64748b';
+        const scorePct = Math.round(p.score * 100);
+        const [x, y, w, h] = p.bbox.map(Math.round);
+
+        // Badge couleur selon niveau de score
+        let scoreClass = 'bg-success text-white';
+        if (scorePct < 60) scoreClass = 'bg-warning text-dark';
+        else if (scorePct < 80) scoreClass = 'bg-info text-dark';
+
+        html += `
+            <div class="detection-detail-item">
+                <div class="d-flex align-items-center gap-2">
+                    <span class="legend-dot" style="background-color: ${color}"></span>
+                    <strong class="text-dark">#${index + 1} ${labelFr}</strong>
+                    ${p.originalClass && p.originalClass !== p.class ? `<span class="badge bg-secondary-subtle text-secondary fs-xs">ex-${p.originalClass}</span>` : ''}
+                </div>
+                <div class="d-flex align-items-center gap-2">
+                    <span class="text-muted font-monospace fs-xs d-none d-sm-inline">[${x}, ${y}, ${w}×${h}px]</span>
+                    <span class="detection-score-pill ${scoreClass}">${scorePct}%</span>
+                </div>
+            </div>
+        `;
+    });
+
+    DOM.liveDetectionsDetailList.innerHTML = html;
 }
 
 // ============================================================================
