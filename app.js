@@ -9,6 +9,9 @@
 
 'use strict';
 
+// URL du Worker Cloudflare — mettre à jour après déploiement
+const WORKER_URL = 'https://epita-smart-classroom.maiwenn-foucher.workers.dev';
+
 // ============================================================================
 // 1. DICTIONNAIRE DE TRADUCTION COCO-SSD (80 CLASSES ANGLAIS -> FRANÇAIS)
 // ============================================================================
@@ -167,6 +170,7 @@ const DOM = {
     btnStopCamera: document.getElementById('btnStopCamera'),
     btnFreezeFrame: document.getElementById('btnFreezeFrame'),
     freezeBtnText: document.getElementById('freezeBtnText'),
+    btnSaveCapture: document.getElementById('btnSaveCapture'),
     cameraSelect: document.getElementById('cameraSelect'),
     confidenceRange: document.getElementById('confidenceRange'),
     confidenceValueDisplay: document.getElementById('confidenceValueDisplay'),
@@ -243,6 +247,9 @@ function setupEventListeners() {
     DOM.btnStartCameraOverlay.addEventListener('click', startCamera);
     DOM.btnStopCamera.addEventListener('click', stopCamera);
     DOM.btnFreezeFrame.addEventListener('click', toggleFreezeFrame);
+    if (DOM.btnSaveCapture) {
+        DOM.btnSaveCapture.addEventListener('click', saveCaptureToDB);
+    }
     
     // Sélecteur de périphérique caméra
     DOM.cameraSelect.addEventListener('change', async () => {
@@ -438,6 +445,7 @@ async function startCamera() {
         DOM.btnStartCamera.disabled = true;
         DOM.btnStopCamera.disabled = false;
         DOM.btnFreezeFrame.disabled = false;
+        if (DOM.btnSaveCapture) DOM.btnSaveCapture.disabled = false;
         
         DOM.cameraStatusBadge.className = 'badge bg-success-subtle text-success border border-success-subtle d-flex align-items-center gap-1 px-3 py-2';
         DOM.cameraStatusBadge.innerHTML = `<i class="bi bi-camera-video-fill"></i> <span>Caméra active</span>`;
@@ -499,6 +507,9 @@ function stopCamera() {
     DOM.btnStartCamera.disabled = false;
     DOM.btnStopCamera.disabled = true;
     DOM.btnFreezeFrame.disabled = true;
+    if (DOM.btnSaveCapture && DOM.importedImage.style.display !== 'block') {
+        DOM.btnSaveCapture.disabled = true;
+    }
 
     DOM.cameraStatusBadge.className = 'badge bg-secondary-subtle text-secondary border d-flex align-items-center gap-1 px-3 py-2';
     DOM.cameraStatusBadge.innerHTML = `<i class="bi bi-camera-video-off"></i> <span>Caméra arrêtée</span>`;
@@ -564,6 +575,7 @@ async function handleFileImport(e) {
         DOM.cameraStandbyScreen.style.display = 'none';
         DOM.btnClearImport.classList.remove('d-none');
         DOM.btnClearImport.classList.add('d-inline-flex');
+        if (DOM.btnSaveCapture) DOM.btnSaveCapture.disabled = false;
         showAlert(`Image importée. ${filtered.length} objet(s) détecté(s) avec le seuil actuel.`, 'success', 3000);
 
     } else if (isVideo) {
@@ -594,6 +606,7 @@ async function handleFileImport(e) {
         DOM.liveFeedTag.classList.add('d-flex');
         DOM.btnStopCamera.disabled = false;
         DOM.btnFreezeFrame.disabled = false;
+        if (DOM.btnSaveCapture) DOM.btnSaveCapture.disabled = false;
         DOM.btnClearImport.classList.remove('d-none');
         DOM.btnClearImport.classList.add('d-inline-flex');
 
@@ -636,6 +649,7 @@ function clearImportedMedia() {
     DOM.btnStartCamera.disabled = false;
     DOM.btnStopCamera.disabled = true;
     DOM.btnFreezeFrame.disabled = true;
+    if (DOM.btnSaveCapture) DOM.btnSaveCapture.disabled = true;
     DOM.cameraStandbyScreen.style.display = 'flex';
 
     DOM.cameraStatusBadge.className = 'badge bg-secondary-subtle text-secondary border d-flex align-items-center gap-1 px-3 py-2';
@@ -1168,7 +1182,7 @@ function buildFullReportText() {
 --------------------------------------------------------------------------------
 - Date de l'audit        : ${formattedDate}
 - Heure de prélèvement   : ${formattedTime}
-- Auditeur en charge     : Omar CORTY - EPITA ING3 GITM
+- Auditeur en charge     : Maïwenn FOUCHER - EPITA ING3 GITM
 - Module académique      : AI for Project Management
 - Salle auditée          : Salle de cours standard (EPITA Campus Kremlin-Bicêtre)
 - Système de vision      : EPITA Smart Classroom v1.0 (Edge In-Browser Vision)
@@ -1236,7 +1250,7 @@ d) Assimilation sémantique : La classe COCO-SSD 'tv' sert ici de substitut
 
 ================================================================================
 Rapport généré automatiquement par l'application EPITA Smart Classroom
-Conçu par Omar CORTY - EPITA GITM - AI for Project Management
+Conçu par Maïwenn FOUCHER - EPITA GITM - AI for Project Management
 ================================================================================`;
 
     return report;
@@ -1349,3 +1363,123 @@ function padRight(str, length) {
     if (s.length >= length) return s.slice(0, length);
     return s + ' '.repeat(length - s.length);
 }
+
+// ============================================================================
+// CLOUDFLARE D1 — SAUVEGARDE ET GALERIE DES CAPTURES
+// ============================================================================
+
+/**
+ * Capture la frame courante du canvas+vidéo et l'envoie à Cloudflare D1
+ */
+async function saveCaptureToDB() {
+    // Create a temp canvas to composite video + overlay
+    const tempCanvas = document.createElement('canvas');
+    const source = DOM.importedImage.style.display === 'block' ? DOM.importedImage : DOM.webcam;
+    tempCanvas.width = source.videoWidth || source.naturalWidth || DOM.canvas.width;
+    tempCanvas.height = source.videoHeight || source.naturalHeight || DOM.canvas.height;
+    const ctx2 = tempCanvas.getContext('2d');
+    ctx2.drawImage(source, 0, 0, tempCanvas.width, tempCanvas.height);
+    ctx2.drawImage(DOM.canvas, 0, 0, tempCanvas.width, tempCanvas.height);
+    const imageData = tempCanvas.toDataURL('image/jpeg', 0.7);
+
+    const body = {
+        imageData,
+        timestamp: new Date().toISOString(),
+        detections: AppState.latestPredictions.map(p => ({
+            class: p.class,
+            score: Math.round(p.score * 100),
+            labelFr: COCO_TRANSLATIONS_FR[p.class] || p.class
+        })),
+        auditSummary: {
+            total: Object.values(AppState.currentDetectedCounts).reduce((a,b)=>a+b,0),
+            categories: Object.keys(AppState.currentDetectedCounts).length,
+            status: DOM.globalStatusTitle ? DOM.globalStatusTitle.textContent : 'N/A'
+        }
+    };
+
+    try {
+        const res = await fetch(`${WORKER_URL}/api/captures`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body)
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        showAlert(`Capture #${data.id} sauvegardée dans Cloudflare D1.`, 'success', 3000);
+        loadGallery();
+    } catch(err) {
+        showAlert(`Erreur sauvegarde: ${err.message}`, 'danger', 4000);
+    }
+}
+
+/**
+ * Charge les dernières captures depuis Cloudflare D1 et les affiche
+ */
+async function loadGallery() {
+    const galleryEl = document.getElementById('captureGallery');
+    if (!galleryEl) return;
+    galleryEl.innerHTML = '<div class="text-center text-muted py-3"><span class="spinner-border spinner-border-sm"></span> Chargement...</div>';
+    try {
+        const res = await fetch(`${WORKER_URL}/api/captures`);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const { captures } = await res.json();
+        if (!captures || captures.length === 0) {
+            galleryEl.innerHTML = '<p class="text-muted text-center small py-3">Aucune capture sauvegardée.</p>';
+            return;
+        }
+        galleryEl.innerHTML = captures.map(c => {
+            const summary = JSON.parse(c.audit_summary_json || '{}');
+            const detections = JSON.parse(c.detections_json || '[]');
+            const date = new Date(c.timestamp).toLocaleString('fr-FR');
+            return `
+                <div class="capture-card card shadow-sm border-0 mb-2">
+                    <div class="card-body p-2 d-flex align-items-center gap-3">
+                        <img src="${c.thumbnail}" class="rounded" style="width:80px;height:60px;object-fit:cover;cursor:pointer"
+                             onclick="openCaptureDetail(${c.id})" title="Voir en grand"
+                             onerror="this.onerror=null;this.src='data:image/svg+xml,%3Csvg xmlns=\\'http://www.w3.org/2000/svg\\' width=\\'80\\' height=\\'60\\'%3E%3Crect fill=\\'%236c757d\\' width=\\'80\\' height=\\'60\\'/%3E%3Ctext fill=\\'%23fff\\' font-size=\\'11\\' x=\\'50%25\\' y=\\'55%25\\' text-anchor=\\'middle\\'%3E📷 %23${c.id}%3C/text%3E%3C/svg%3E';">
+                        <div class="flex-grow-1">
+                            <div class="fw-semibold small">${date}</div>
+                            <div class="text-muted fs-xs">${summary.total || 0} objet(s) • ${summary.categories || 0} catégorie(s)</div>
+                            <div class="fs-xs text-truncate text-secondary">${summary.status || ''}</div>
+                        </div>
+                        <button class="btn btn-sm btn-outline-danger py-0" onclick="deleteCapture(${c.id})" title="Supprimer">
+                            <i class="bi bi-trash3"></i>
+                        </button>
+                    </div>
+                </div>`;
+        }).join('');
+    } catch(err) {
+        galleryEl.innerHTML = `<p class="text-danger small">${err.message}</p>`;
+    }
+}
+
+async function openCaptureDetail(id) {
+    try {
+        const res = await fetch(`${WORKER_URL}/api/captures/${id}`);
+        const { capture } = await res.json();
+        // Show in a modal or new tab
+        const win = window.open();
+        if (win) {
+            win.document.write(`<img src="${capture.image_data}" style="max-width:100%">`);
+        } else {
+            showAlert('Fenêtre pop-up bloquée. Veuillez autoriser les pop-ups.', 'warning');
+        }
+    } catch(err) { showAlert('Erreur chargement capture.', 'danger'); }
+}
+
+async function deleteCapture(id) {
+    if (!confirm('Supprimer cette capture ?')) return;
+    try {
+        await fetch(`${WORKER_URL}/api/captures/${id}`, { method: 'DELETE' });
+        showAlert('Capture supprimée.', 'secondary', 2000);
+        loadGallery();
+    } catch(err) { showAlert('Erreur suppression.', 'danger'); }
+}
+
+// Exposer sur l'objet global window pour les handlers HTML onclick
+window.saveCaptureToDB = saveCaptureToDB;
+window.loadGallery = loadGallery;
+window.openCaptureDetail = openCaptureDetail;
+window.deleteCapture = deleteCapture;
+
+

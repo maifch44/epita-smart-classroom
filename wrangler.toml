@@ -1,0 +1,11 @@
+name = "epita-smart-classroom"
+main = "worker.js"
+compatibility_date = "2024-01-01"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "epita-classroom-db"
+database_id = "placeholder-replace-after-creation"
+
+[site]
+bucket = "./"
