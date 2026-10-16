@@ -1,0 +1,405 @@
+/* ==========================================================================
+   EPITA Smart Classroom — Stylesheet
+   Auteur : Omar CORTY - EPITA GITM
+   Thème : Moderne, épuré, inspiration ingénierie EPITA & Edge AI
+   ========================================================================== */
+
+/* Variables CSS globales */
+:root {
+    --epita-navy: #0b1e36;
+    --epita-dark: #0f172a;
+    --epita-blue: #0059b3;
+    --epita-blue-light: #0d6efd;
+    --epita-cyan: #0ea5e9;
+    --epita-accent: #2563eb;
+    --card-shadow: 0 4px 20px -2px rgba(15, 23, 42, 0.08), 0 2px 6px -1px rgba(15, 23, 42, 0.04);
+    --card-shadow-hover: 0 10px 25px -3px rgba(15, 23, 42, 0.12), 0 4px 10px -2px rgba(15, 23, 42, 0.06);
+    --border-color: #e2e8f0;
+    --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+    --font-mono: 'JetBrains Mono', SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+/* Base & Typographie */
+body {
+    font-family: var(--font-sans);
+    color: #334155;
+    background-color: #f8fafc;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+}
+
+/* Couleurs personnalisées */
+.bg-epita-navy {
+    background-color: var(--epita-navy) !important;
+}
+
+.bg-epita-dark {
+    background: linear-gradient(135deg, #0b1e36 0%, #0f172a 100%) !important;
+}
+
+.bg-epita-blue {
+    background-color: var(--epita-blue) !important;
+}
+
+.text-white-25 {
+    color: rgba(255, 255, 255, 0.25) !important;
+}
+
+.text-white-75 {
+    color: rgba(255, 255, 255, 0.75) !important;
+}
+
+.fs-xs {
+    font-size: 0.75rem !important;
+}
+
+.fs-sm {
+    font-size: 0.875rem !important;
+}
+
+.fw-extrabold {
+    font-weight: 800 !important;
+}
+
+.tracking-tight {
+    letter-spacing: -0.025em;
+}
+
+.tracking-wider {
+    letter-spacing: 0.05em;
+}
+
+.backdrop-blur {
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+}
+
+.min-w-200 {
+    min-width: 200px;
+}
+
+.max-w-sm {
+    max-width: 320px;
+}
+
+.max-h-160 {
+    max-height: 160px;
+}
+
+/* Hover effects */
+.hover-white:hover {
+    color: #ffffff !important;
+}
+
+/* ==========================================================================
+   ZONE CAMÉRA ET CANVAS OVERLAY (CRITIQUE)
+   ========================================================================== */
+
+.camera-stage-wrapper {
+    position: relative;
+    width: 100%;
+    min-height: 380px;
+    background-color: #020617;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    box-shadow: inset 0 2px 8px rgba(0, 0, 0, 0.6);
+}
+
+/* Élément vidéo */
+#webcam {
+    display: block;
+    width: 100%;
+    height: auto;
+    max-height: 520px;
+    object-fit: contain;
+    background-color: #000;
+}
+
+/* Canvas superposé exactement sur la vidéo */
+#canvasOverlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none; /* Ne bloque pas les clics si besoin */
+    z-index: 5;
+}
+
+/* Écran de veille / Standby lorsque la caméra est arrêtée */
+.camera-overlay-placeholder {
+    position: absolute;
+    inset: 0;
+    background: radial-gradient(circle at center, #1e293b 0%, #0f172a 100%);
+    z-index: 10;
+    transition: opacity 0.3s ease, visibility 0.3s ease;
+}
+
+.standby-icon-box {
+    width: 72px;
+    height: 72px;
+    border-radius: 50%;
+    background-color: rgba(255, 255, 255, 0.05);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+/* Voyant clignotant "EN DIRECT" */
+.pulse-indicator {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background-color: #ffffff;
+    box-shadow: 0 0 0 rgba(255, 255, 255, 0.7);
+    animation: pulseAnimation 1.5s infinite;
+}
+
+@keyframes pulseAnimation {
+    0% {
+        box-shadow: 0 0 0 0 rgba(255, 255, 255, 0.8);
+    }
+    70% {
+        box-shadow: 0 0 0 8px rgba(255, 255, 255, 0);
+    }
+    100% {
+        box-shadow: 0 0 0 0 rgba(255, 255, 255, 0);
+    }
+}
+
+/* ==========================================================================
+   CARTES ET TABLEAUX DE BORD (DASHBOARD)
+   ========================================================================== */
+
+.card {
+    border-radius: 0.75rem;
+    box-shadow: var(--card-shadow);
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.metric-card {
+    border: 1px solid #e2e8f0;
+    background-color: #ffffff !important;
+    transition: all 0.2s ease;
+}
+
+.metric-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+}
+
+.metric-icon-bubble {
+    width: 38px;
+    height: 38px;
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.15rem;
+}
+
+/* Bannière de Statut Global */
+.audit-status-banner {
+    border-radius: 0.75rem;
+    background-color: #f1f5f9;
+    border: 1px solid #cbd5e1;
+    transition: all 0.3s ease;
+}
+
+.audit-status-banner.status-ok {
+    background-color: #f0fdf4;
+    border-color: #86efac;
+}
+
+.audit-status-banner.status-warning {
+    background-color: #fffbeb;
+    border-color: #fcd34d;
+}
+
+.audit-status-banner.status-danger {
+    background-color: #fef2f2;
+    border-color: #fca5a5;
+}
+
+/* ==========================================================================
+   TABLEAU D'AUDIT (TABLE & BADGES)
+   ========================================================================== */
+
+.audit-table th {
+    font-weight: 600;
+    letter-spacing: 0.03em;
+    border-top: none;
+    padding: 0.85rem 0.75rem;
+}
+
+.audit-table td {
+    padding: 0.85rem 0.75rem;
+    vertical-align: middle;
+}
+
+.audit-qty-input {
+    width: 80px;
+    font-weight: 600;
+    text-align: center;
+}
+
+/* Badges de statut */
+.badge-conforme {
+    background-color: #dcfce7;
+    color: #15803d;
+    border: 1px solid #bbf7d0;
+    font-weight: 600;
+    padding: 0.4rem 0.65rem;
+    border-radius: 9999px;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+}
+
+.badge-deficit {
+    background-color: #fee2e2;
+    color: #b91c1c;
+    border: 1px solid #fecaca;
+    font-weight: 600;
+    padding: 0.4rem 0.65rem;
+    border-radius: 9999px;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+}
+
+.badge-excedent {
+    background-color: #fef3c7;
+    color: #b45309;
+    border: 1px solid #fde68a;
+    font-weight: 600;
+    padding: 0.4rem 0.65rem;
+    border-radius: 9999px;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+}
+
+.legend-dot {
+    display: inline-block;
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+}
+
+/* Badges des objets détectés en temps réel */
+.detection-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.35rem 0.65rem;
+    border-radius: 9999px;
+    background-color: #f1f5f9;
+    border: 1px solid #e2e8f0;
+    font-size: 0.825rem;
+    font-weight: 500;
+    transition: all 0.2s ease;
+}
+
+.detection-pill .pill-count {
+    background-color: #0284c7;
+    color: white;
+    font-weight: 700;
+    font-size: 0.75rem;
+    border-radius: 9999px;
+    padding: 0.1rem 0.45rem;
+}
+
+/* ==========================================================================
+   RAPPORT D'AUDIT (FORMATTING & PRINT)
+   ========================================================================== */
+
+.report-paper-container {
+    background-color: #ffffff;
+    border: 1px solid #cbd5e1;
+    border-radius: 8px;
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.05);
+}
+
+.report-pre-content {
+    font-family: var(--font-mono);
+    font-size: 0.85rem;
+    line-height: 1.6;
+    color: #1e293b;
+    white-space: pre-wrap;
+    word-break: break-word;
+    background-color: transparent;
+    border: none;
+    padding: 0;
+}
+
+/* Curseur du Slider de confiance */
+.form-range::-webkit-slider-thumb {
+    background-color: var(--epita-blue-light);
+}
+
+.form-range::-webkit-slider-thumb:focus {
+    box-shadow: 0 0 0 1px #fff, 0 0 0 0.25rem rgba(13, 110, 253, 0.25);
+}
+
+/* Transition douce générale */
+.transition-all {
+    transition: all 0.3s ease;
+}
+
+/* ==========================================================================
+   STYLISATION DE L'IMPRESSION (@media print)
+   ========================================================================== */
+@media print {
+    /* Masquer les éléments interactifs inutiles à l'impression */
+    header,
+    .hero-section,
+    .camera-stage-wrapper,
+    .camera-controls-bar,
+    #confidenceRange,
+    .form-range,
+    button,
+    footer,
+    .modal,
+    #alertContainer {
+        display: none !important;
+    }
+
+    body {
+        background-color: #ffffff !important;
+        color: #000000 !important;
+        font-size: 11pt;
+    }
+
+    .card {
+        box-shadow: none !important;
+        border: none !important;
+    }
+
+    .card-header {
+        background: transparent !important;
+        border-bottom: 2px solid #000000 !important;
+        padding-left: 0 !important;
+        padding-right: 0 !important;
+    }
+
+    .report-paper-container {
+        border: none !important;
+        box-shadow: none !important;
+        padding: 0 !important;
+    }
+
+    .report-pre-content {
+        font-size: 10pt !important;
+        line-height: 1.4 !important;
+    }
+
+    /* Forcer le saut de page si nécessaire */
+    .page-break {
+        page-break-before: always;
+    }
+}

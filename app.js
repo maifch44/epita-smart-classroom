@@ -1,0 +1,1178 @@
+/**
+ * ============================================================================
+ * EPITA Smart Classroom — Application Logic
+ * Auteur : Omar CORTY - EPITA GITM
+ * Module : AI for Project Management (ING3)
+ * Vision IA : TensorFlow.js & COCO-SSD
+ * ============================================================================
+ */
+
+'use strict';
+
+// ============================================================================
+// 1. DICTIONNAIRE DE TRADUCTION COCO-SSD (80 CLASSES ANGLAIS -> FRANÇAIS)
+// ============================================================================
+const COCO_TRANSLATIONS_FR = {
+    'person': 'Personne',
+    'bicycle': 'Vélo',
+    'car': 'Voiture',
+    'motorcycle': 'Moto',
+    'airplane': 'Avion',
+    'bus': 'Bus',
+    'train': 'Train',
+    'truck': 'Camion',
+    'boat': 'Bateau',
+    'traffic light': 'Feu tricolore',
+    'fire hydrant': 'Borne incendie',
+    'stop sign': 'Panneau Stop',
+    'parking meter': 'Horodateur',
+    'bench': 'Banc',
+    'bird': 'Oiseau',
+    'cat': 'Chat',
+    'dog': 'Chien',
+    'horse': 'Cheval',
+    'sheep': 'Mouton',
+    'cow': 'Vache',
+    'elephant': 'Éléphant',
+    'bear': 'Ours',
+    'zebra': 'Zèbre',
+    'giraffe': 'Girafe',
+    'backpack': 'Sac à dos',
+    'umbrella': 'Parapluie',
+    'handbag': 'Sac à main',
+    'tie': 'Cravate',
+    'suitcase': 'Valise',
+    'frisbee': 'Frisbee',
+    'skis': 'Skis',
+    'snowboard': 'Snowboard',
+    'sports ball': 'Ballon de sport',
+    'kite': 'Cerf-volant',
+    'baseball bat': 'Batte de baseball',
+    'baseball glove': 'Gant de baseball',
+    'skateboard': 'Skateboard',
+    'surfboard': 'Planche de surf',
+    'tennis racket': 'Raquette de tennis',
+    'bottle': 'Bouteille',
+    'wine glass': 'Verre à vin',
+    'cup': 'Tasse / Gobelet',
+    'fork': 'Fourchette',
+    'knife': 'Couteau',
+    'spoon': 'Cuillère',
+    'bowl': 'Bol',
+    'banana': 'Banane',
+    'apple': 'Pomme',
+    'sandwich': 'Sandwich',
+    'orange': 'Orange',
+    'broccoli': 'Brocoli',
+    'carrot': 'Carotte',
+    'hot dog': 'Hot dog',
+    'pizza': 'Pizza',
+    'donut': 'Donut',
+    'cake': 'Gâteau',
+    'chair': 'Chaise',
+    'couch': 'Canapé / Fauteuil',
+    'potted plant': 'Plante en pot',
+    'bed': 'Lit',
+    'dining table': 'Table',
+    'toilet': 'Toilettes',
+    'tv': 'Tableau / Écran',
+    'laptop': 'Ordinateur portable',
+    'mouse': 'Souris d\'ordinateur',
+    'remote': 'Télécommande',
+    'keyboard': 'Clavier',
+    'cell phone': 'Téléphone portable',
+    'microwave': 'Micro-ondes',
+    'oven': 'Four',
+    'toaster': 'Grille-pain',
+    'sink': 'Évier / Lavabo',
+    'refrigerator': 'Réfrigérateur',
+    'book': 'Livre / Manuel',
+    'clock': 'Horloge',
+    'vase': 'Vase',
+    'scissors': 'Ciseaux',
+    'teddy bear': 'Ours en peluche',
+    'hair drier': 'Sèche-cheveux',
+    'toothbrush': 'Brosse à dents'
+};
+
+// Palette de couleurs pour les boîtes de détection par catégorie
+const CATEGORY_COLORS = {
+    'chair': '#3b82f6',        // Bleu
+    'dining table': '#10b981', // Vert émeraude
+    'tv': '#8b5cf6',          // Violet
+    'laptop': '#f59e0b',      // Ambre / Orange
+    'book': '#ec4899',        // Rose
+    'person': '#06b6d4',      // Cyan
+    'backpack': '#6366f1',    // Indigo
+    'cell phone': '#14b8a6',  // Sarcelle
+    'bottle': '#84cc16',      // Citron vert
+    'cup': '#a855f7',         // Violet doux
+    'mouse': '#eab308',       // Jaune
+    'keyboard': '#64748b',    // Ardoise
+    'default': '#0284c7'      // Bleu ciel par défaut
+};
+
+// ============================================================================
+// 2. CONFIGURATION INITIALE DE L'AUDIT DE SALLE DE CLASSE
+// Configuration théorique par défaut : 10 tables, 20 chaises, 1 tableau, 5 PC
+// ============================================================================
+const DEFAULT_AUDIT_RULES = [
+    { key: 'dining table', labelFr: 'Tables', expected: 10, icon: 'bi-table', note: 'Mobilier de travail principal' },
+    { key: 'chair', labelFr: 'Chaises', expected: 20, icon: 'bi-chair', note: 'Assises élèves' },
+    { key: 'tv', labelFr: 'Tableaux / Écrans', expected: 1, icon: 'bi-display', note: 'Assimilé au tableau interactif / moniteur' },
+    { key: 'laptop', labelFr: 'Ordinateurs portables', expected: 5, icon: 'bi-laptop', note: 'Postes informatiques portables' }
+];
+
+// État actif de l'application
+const AppState = {
+    model: null,
+    isModelLoading: true,
+    isStreaming: false,
+    isFrozen: false,
+    mediaStream: null,
+    animationFrameId: null,
+    confidenceThreshold: 0.50, // Seuil par défaut à 50%
+    
+    // Règles d'audit actives (clonées au démarrage)
+    auditRules: JSON.parse(JSON.stringify(DEFAULT_AUDIT_RULES)),
+    
+    // Dernières prédictions filtrées
+    latestPredictions: [],
+    
+    // Dictionnaire des comptages d'objets actuellement détectés : { 'chair': 12, 'tv': 1, ... }
+    currentDetectedCounts: {},
+    
+    // Métriques de performance
+    fps: 0,
+    frameCount: 0,
+    lastFpsUpdateTime: performance.now(),
+    inferenceLatencyMs: 0
+};
+
+// ============================================================================
+// 3. ÉLÉMENTS DU DOM
+// ============================================================================
+const DOM = {
+    webcam: document.getElementById('webcam'),
+    canvas: document.getElementById('canvasOverlay'),
+    canvasCtx: document.getElementById('canvasOverlay').getContext('2d'),
+    cameraStandbyScreen: document.getElementById('cameraStandbyScreen'),
+    btnStartCameraOverlay: document.getElementById('btnStartCameraOverlay'),
+    overlayBtnSpinner: document.getElementById('overlayBtnSpinner'),
+    liveFeedTag: document.getElementById('liveFeedTag'),
+    freezeIndicator: document.getElementById('freezeIndicator'),
+    
+    // Boutons de contrôle
+    btnStartCamera: document.getElementById('btnStartCamera'),
+    btnStopCamera: document.getElementById('btnStopCamera'),
+    btnFreezeFrame: document.getElementById('btnFreezeFrame'),
+    freezeBtnText: document.getElementById('freezeBtnText'),
+    cameraSelect: document.getElementById('cameraSelect'),
+    confidenceRange: document.getElementById('confidenceRange'),
+    confidenceValueDisplay: document.getElementById('confidenceValueDisplay'),
+    
+    // Badges statut supérieur
+    modelStatusBadge: document.getElementById('modelStatusBadge'),
+    modelStatusText: document.getElementById('modelStatusText'),
+    cameraStatusBadge: document.getElementById('cameraStatusBadge'),
+    cameraStatusText: document.getElementById('cameraStatusText'),
+    
+    // Compteurs FPS & Latence
+    fpsCounter: document.getElementById('fpsCounter'),
+    latencyCounter: document.getElementById('latencyCounter'),
+    
+    // KPIs du tableau de bord
+    kpiTotalDetected: document.getElementById('kpiTotalDetected'),
+    kpiCategoriesCount: document.getElementById('kpiCategoriesCount'),
+    kpiRulesCount: document.getElementById('kpiRulesCount'),
+    kpiDiscrepanciesCount: document.getElementById('kpiDiscrepanciesCount'),
+    kpiDiscrepanciesIcon: document.getElementById('kpiDiscrepanciesIcon'),
+    globalStatusBanner: document.getElementById('globalStatusBanner'),
+    globalStatusTitle: document.getElementById('globalStatusTitle'),
+    globalStatusDesc: document.getElementById('globalStatusDesc'),
+    globalStatusIcon: document.getElementById('globalStatusIcon'),
+    detectedItemsPills: document.getElementById('detectedItemsPills'),
+    detectedBadgeCount: document.getElementById('detectedBadgeCount'),
+    
+    // Tableau d'audit
+    auditTableBody: document.getElementById('auditTableBody'),
+    btnResetConfig: document.getElementById('btnResetConfig'),
+    btnOpenAddRuleModal: document.getElementById('btnOpenAddRuleModal'),
+    
+    // Modal ajout de règle
+    newRuleCategorySelect: document.getElementById('newRuleCategorySelect'),
+    newRuleQuantityInput: document.getElementById('newRuleQuantityInput'),
+    btnAddRuleConfirm: document.getElementById('btnAddRuleConfirm'),
+    
+    // Rapport d'audit
+    reportContentArea: document.getElementById('reportContentArea'),
+    btnGenerateReport: document.getElementById('btnGenerateReport'),
+    btnCopyReport: document.getElementById('btnCopyReport'),
+    btnDownloadReport: document.getElementById('btnDownloadReport'),
+    btnPrintReport: document.getElementById('btnPrintReport'),
+    
+    // Alertes
+    alertContainer: document.getElementById('alertContainer')
+};
+
+// ============================================================================
+// 4. INITIALISATION DE L'APPLICATION
+// ============================================================================
+document.addEventListener('DOMContentLoaded', async () => {
+    setupEventListeners();
+    populateCategoryModalSelect();
+    renderAuditTable();
+    updateDashboard();
+    generateReportPreview();
+    await loadCocoSsdModel();
+    await populateCameraDevices();
+});
+
+/**
+ * Configure les écouteurs d'événements de l'interface
+ */
+function setupEventListeners() {
+    // Boutons de contrôle de la caméra
+    DOM.btnStartCamera.addEventListener('click', startCamera);
+    DOM.btnStartCameraOverlay.addEventListener('click', startCamera);
+    DOM.btnStopCamera.addEventListener('click', stopCamera);
+    DOM.btnFreezeFrame.addEventListener('click', toggleFreezeFrame);
+    
+    // Sélecteur de périphérique caméra
+    DOM.cameraSelect.addEventListener('change', async () => {
+        if (AppState.isStreaming) {
+            stopCamera();
+            await startCamera();
+        }
+    });
+
+    // Slider de seuil de confiance
+    DOM.confidenceRange.addEventListener('input', (e) => {
+        const val = parseInt(e.target.value, 10);
+        AppState.confidenceThreshold = val / 100;
+        DOM.confidenceValueDisplay.textContent = `${val}%`;
+        
+        // Si l'image est figée, redessiner immédiatement avec le nouveau seuil
+        if (AppState.isFrozen && AppState.latestPredictions.length > 0) {
+            processAndRenderPredictions(AppState.latestPredictions);
+        }
+    });
+
+    // Bouton de réinitialisation de la configuration théorique
+    DOM.btnResetConfig.addEventListener('click', () => {
+        AppState.auditRules = JSON.parse(JSON.stringify(DEFAULT_AUDIT_RULES));
+        renderAuditTable();
+        updateDashboard();
+        showAlert('Configuration réinitialisée aux valeurs de référence (10 tables, 20 chaises, 1 tableau, 5 PC).', 'info', 3000);
+    });
+
+    // Modal d'ajout de règle personnalisée
+    DOM.btnAddRuleConfirm.addEventListener('click', handleAddNewRule);
+
+    // Boutons du rapport d'audit
+    DOM.btnGenerateReport.addEventListener('click', () => {
+        generateReportPreview();
+        showAlert('Rapport d\'audit actualisé avec succès avec les métriques courantes.', 'success', 2500);
+    });
+
+    DOM.btnCopyReport.addEventListener('click', copyReportToClipboard);
+    DOM.btnDownloadReport.addEventListener('click', downloadReportFile);
+    DOM.btnPrintReport.addEventListener('click', () => window.print());
+
+    // Ajustement dynamique du canvas lors du redimensionnement de la fenêtre
+    window.addEventListener('resize', syncCanvasDimensions);
+}
+
+// ============================================================================
+// 5. CHARGEMENT DU MODÈLE TENSORFLOW.JS COCO-SSD
+// ============================================================================
+async function loadCocoSsdModel() {
+    try {
+        updateModelStatus('loading', 'Chargement du modèle COCO-SSD...');
+        
+        // Chargement du modèle coco-ssd officiel (MobileNetLite v2 par défaut)
+        AppState.model = await cocoSsd.load({
+            base: 'lite_mobilenet_v2' // Très rapide et optimisé pour le temps réel en navigateur
+        });
+        
+        AppState.isModelLoading = false;
+        updateModelStatus('ready', 'Modèle COCO-SSD prêt');
+        
+        // Activer les boutons de démarrage
+        DOM.btnStartCamera.disabled = false;
+        DOM.btnStartCameraOverlay.disabled = false;
+        DOM.overlayBtnSpinner.classList.add('d-none');
+        
+    } catch (error) {
+        console.error('Erreur lors du chargement de COCO-SSD :', error);
+        AppState.isModelLoading = false;
+        updateModelStatus('error', 'Échec du chargement IA');
+        showAlert(
+            `<strong>Erreur d'initialisation du modèle IA :</strong> Impossible de charger COCO-SSD depuis le CDN.<br>Détail : ${error.message}. Vérifiez votre connexion Internet et rechargez la page.`,
+            'danger'
+        );
+    }
+}
+
+/**
+ * Met à jour le badge de statut du modèle dans la barre supérieure
+ */
+function updateModelStatus(status, text) {
+    DOM.modelStatusText.textContent = text;
+    DOM.modelStatusBadge.className = 'badge d-flex align-items-center gap-1 px-3 py-2';
+
+    if (status === 'loading') {
+        DOM.modelStatusBadge.classList.add('bg-warning-subtle', 'text-warning', 'border', 'border-warning-subtle');
+        DOM.modelStatusBadge.innerHTML = `<span class="spinner-border spinner-border-sm" role="status"></span> <span>${text}</span>`;
+    } else if (status === 'ready') {
+        DOM.modelStatusBadge.classList.add('bg-success-subtle', 'text-success', 'border', 'border-success-subtle');
+        DOM.modelStatusBadge.innerHTML = `<i class="bi bi-check-circle-fill"></i> <span>${text}</span>`;
+    } else {
+        DOM.modelStatusBadge.classList.add('bg-danger-subtle', 'text-danger', 'border', 'border-danger-subtle');
+        DOM.modelStatusBadge.innerHTML = `<i class="bi bi-exclamation-triangle-fill"></i> <span>${text}</span>`;
+    }
+}
+
+// ============================================================================
+// 6. GESTION DU FLUX CAMÉRA (WEBCAM API)
+// ============================================================================
+
+/**
+ * Récupère les périphériques vidéo disponibles et remplit le sélecteur
+ */
+async function populateCameraDevices() {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.enumerateDevices) return;
+    
+    try {
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        const videoDevices = devices.filter(d => d.kind === 'videoinput');
+        
+        if (videoDevices.length > 0) {
+            DOM.cameraSelect.innerHTML = '';
+            videoDevices.forEach((device, index) => {
+                const opt = document.createElement('option');
+                opt.value = device.deviceId;
+                opt.textContent = device.label || `Caméra ${index + 1}`;
+                DOM.cameraSelect.appendChild(opt);
+            });
+            DOM.cameraSelect.disabled = false;
+        }
+    } catch (err) {
+        console.warn('Impossible de lister les caméras :', err);
+    }
+}
+
+/**
+ * Démarre la capture de la webcam et la boucle d'inférence
+ */
+async function startCamera() {
+    if (AppState.isModelLoading || !AppState.model) {
+        showAlert('Veuillez patienter pendant le chargement du modèle COCO-SSD.', 'warning', 3000);
+        return;
+    }
+
+    try {
+        // Contraintes média : résolution HD recommandée
+        const selectedDeviceId = DOM.cameraSelect.value;
+        const constraints = {
+            video: {
+                width: { ideal: 1280 },
+                height: { ideal: 720 },
+                facingMode: selectedDeviceId ? undefined : { ideal: 'environment' },
+                deviceId: selectedDeviceId ? { exact: selectedDeviceId } : undefined
+            },
+            audio: false
+        };
+
+        const stream = await navigator.mediaDevices.getUserMedia(constraints);
+        AppState.mediaStream = stream;
+        DOM.webcam.srcObject = stream;
+
+        // Attendre que les métadonnées de la vidéo soient chargées
+        await new Promise((resolve) => {
+            DOM.webcam.onloadedmetadata = () => {
+                DOM.webcam.play();
+                resolve();
+            };
+        });
+
+        AppState.isStreaming = true;
+        AppState.isFrozen = false;
+
+        // Ajuster la taille du canvas
+        syncCanvasDimensions();
+
+        // Mettre à jour l'interface
+        DOM.cameraStandbyScreen.style.display = 'none';
+        DOM.liveFeedTag.classList.remove('d-none');
+        DOM.liveFeedTag.classList.add('d-flex');
+        DOM.freezeIndicator.classList.add('d-none');
+        DOM.freezeBtnText.textContent = 'Figer / Capturer';
+
+        DOM.btnStartCamera.disabled = true;
+        DOM.btnStopCamera.disabled = false;
+        DOM.btnFreezeFrame.disabled = false;
+        
+        DOM.cameraStatusBadge.className = 'badge bg-success-subtle text-success border border-success-subtle d-flex align-items-center gap-1 px-3 py-2';
+        DOM.cameraStatusBadge.innerHTML = `<i class="bi bi-camera-video-fill"></i> <span>Caméra active</span>`;
+
+        // Rafraîchir les labels des périphériques si c'était la première autorisation
+        await populateCameraDevices();
+
+        // Lancer la boucle de détection
+        AppState.lastFpsUpdateTime = performance.now();
+        AppState.frameCount = 0;
+        requestAnimationFrame(detectionLoop);
+
+        showAlert('Caméra activée. Détection IA temps réel en cours d\'exécution...', 'success', 2500);
+
+    } catch (err) {
+        console.error('Erreur d\'accès caméra :', err);
+        let errorMsg = 'Impossible d\'accéder à la webcam.';
+        
+        if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
+            errorMsg = '<strong>Accès refusé :</strong> Vous devez autoriser le navigateur à utiliser la caméra pour démarrer l\'analyse.';
+        } else if (err.name === 'NotFoundError' || err.name === 'DevicesNotFoundError') {
+            errorMsg = '<strong>Aucune caméra trouvée :</strong> Veuillez brancher une webcam ou vérifier vos pilotes vidéo.';
+        } else if (err.name === 'NotReadableError' || err.name === 'TrackStartError') {
+            errorMsg = '<strong>Périphérique occupé :</strong> La webcam est déjà utilisée par une autre application (ex: Teams, Zoom).';
+        }
+
+        showAlert(errorMsg, 'danger');
+        stopCamera();
+    }
+}
+
+/**
+ * Arrête le flux vidéo de la caméra et libère les ressources
+ */
+function stopCamera() {
+    if (AppState.mediaStream) {
+        AppState.mediaStream.getTracks().forEach(track => track.stop());
+        AppState.mediaStream = null;
+    }
+
+    if (AppState.animationFrameId) {
+        cancelAnimationFrame(AppState.animationFrameId);
+        AppState.animationFrameId = null;
+    }
+
+    AppState.isStreaming = false;
+    AppState.isFrozen = false;
+    DOM.webcam.srcObject = null;
+
+    // Réinitialiser le canvas
+    clearCanvas();
+
+    // Mettre à jour l'interface
+    DOM.cameraStandbyScreen.style.display = 'flex';
+    DOM.liveFeedTag.classList.add('d-none');
+    DOM.liveFeedTag.classList.remove('d-flex');
+    DOM.freezeIndicator.classList.add('d-none');
+    
+    DOM.btnStartCamera.disabled = false;
+    DOM.btnStopCamera.disabled = true;
+    DOM.btnFreezeFrame.disabled = true;
+
+    DOM.cameraStatusBadge.className = 'badge bg-secondary-subtle text-secondary border d-flex align-items-center gap-1 px-3 py-2';
+    DOM.cameraStatusBadge.innerHTML = `<i class="bi bi-camera-video-off"></i> <span>Caméra arrêtée</span>`;
+
+    DOM.fpsCounter.textContent = '0 FPS';
+    DOM.latencyCounter.textContent = '0 ms';
+
+    // Conserver les dernières données dans le rapport mais mettre le statut en attente
+    updateDashboard();
+}
+
+/**
+ * Fige ou reprend le flux vidéo (capture instantanée pour audit stable)
+ */
+function toggleFreezeFrame() {
+    if (!AppState.isStreaming) return;
+
+    AppState.isFrozen = !AppState.isFrozen;
+
+    if (AppState.isFrozen) {
+        DOM.freezeIndicator.classList.remove('d-none');
+        DOM.freezeIndicator.classList.add('d-flex');
+        DOM.freezeBtnText.textContent = 'Reprendre le direct';
+        DOM.liveFeedTag.classList.add('d-none');
+        showAlert('Capture d\'écran figée. Vous pouvez auditer précisément ce plan ou exporter le rapport.', 'info', 3000);
+    } else {
+        DOM.freezeIndicator.classList.add('d-none');
+        DOM.freezeBtnText.textContent = 'Figer / Capturer';
+        DOM.liveFeedTag.classList.remove('d-none');
+        DOM.liveFeedTag.classList.add('d-flex');
+        // Relancer la boucle
+        requestAnimationFrame(detectionLoop);
+    }
+}
+
+/**
+ * Ajuste les dimensions internes du Canvas pour correspondre à la vidéo
+ */
+function syncCanvasDimensions() {
+    if (DOM.webcam.videoWidth && DOM.webcam.videoHeight) {
+        DOM.canvas.width = DOM.webcam.videoWidth;
+        DOM.canvas.height = DOM.webcam.videoHeight;
+    }
+}
+
+/**
+ * Efface le contenu du canvas
+ */
+function clearCanvas() {
+    DOM.canvasCtx.clearRect(0, 0, DOM.canvas.width, DOM.canvas.height);
+}
+
+// ============================================================================
+// 7. BOUCLE D'INFÉRENCE ET DÉTECTION D'OBJETS EN TEMPS RÉEL (TF.JS / COCO-SSD)
+// ============================================================================
+async function detectionLoop() {
+    if (!AppState.isStreaming || AppState.isFrozen) {
+        return;
+    }
+
+    if (DOM.webcam.readyState === 4 && AppState.model) {
+        const startTime = performance.now();
+
+        try {
+            // Inférence par COCO-SSD
+            const rawPredictions = await AppState.model.detect(DOM.webcam);
+            AppState.inferenceLatencyMs = Math.round(performance.now() - startTime);
+
+            // Filtrage par seuil de confiance paramétrable
+            const filteredPredictions = rawPredictions.filter(p => p.score >= AppState.confidenceThreshold);
+            AppState.latestPredictions = filteredPredictions;
+
+            // Traitement des boîtes englobantes et mise à jour de l'UI
+            processAndRenderPredictions(filteredPredictions);
+
+            // Calcul du FPS
+            calculateFps();
+
+        } catch (err) {
+            console.error('Erreur lors de la détection COCO-SSD :', err);
+        }
+    }
+
+    // Prochaine itération de la boucle vidéo
+    AppState.animationFrameId = requestAnimationFrame(detectionLoop);
+}
+
+/**
+ * Calcule la fréquence de rafraîchissement (FPS)
+ */
+function calculateFps() {
+    AppState.frameCount++;
+    const now = performance.now();
+    const elapsed = now - AppState.lastFpsUpdateTime;
+
+    if (elapsed >= 500) { // Mise à jour 2 fois par seconde pour stabilité visuelle
+        AppState.fps = Math.round((AppState.frameCount * 1000) / elapsed);
+        AppState.frameCount = 0;
+        AppState.lastFpsUpdateTime = now;
+
+        DOM.fpsCounter.textContent = `${AppState.fps} FPS`;
+        DOM.latencyCounter.textContent = `${AppState.inferenceLatencyMs} ms`;
+    }
+}
+
+/**
+ * Dessine les cadres englobants (bounding boxes) et met à jour l'inventaire
+ */
+function processAndRenderPredictions(predictions) {
+    clearCanvas();
+    syncCanvasDimensions();
+
+    const counts = {};
+
+    predictions.forEach(prediction => {
+        const [x, y, width, height] = prediction.bbox;
+        const categoryKey = prediction.class;
+        const score = prediction.score;
+        const labelFr = COCO_TRANSLATIONS_FR[categoryKey] || categoryKey;
+
+        // Comptabilisation
+        counts[categoryKey] = (counts[categoryKey] || 0) + 1;
+
+        // Choix de la couleur
+        const color = CATEGORY_COLORS[categoryKey] || CATEGORY_COLORS['default'];
+
+        // 1. Dessiner le cadre englobant (bounding box)
+        DOM.canvasCtx.strokeStyle = color;
+        DOM.canvasCtx.lineWidth = 3;
+        DOM.canvasCtx.strokeRect(x, y, width, height);
+
+        // 2. Remplissage semi-transparent élégant
+        DOM.canvasCtx.fillStyle = hexToRgba(color, 0.12);
+        DOM.canvasCtx.fillRect(x, y, width, height);
+
+        // 3. Préparer le texte de l'étiquette (Nom en français + % de confiance)
+        const scorePercent = Math.round(score * 100);
+        const tagText = `${labelFr} (${scorePercent}%)`;
+
+        DOM.canvasCtx.font = '600 13px Inter, sans-serif';
+        const textMetrics = DOM.canvasCtx.measureText(tagText);
+        const textWidth = textMetrics.width;
+        const textHeight = 18;
+        const padding = 5;
+
+        // Positionnement au-dessus ou à l'intérieur selon le bord
+        let tagY = y - textHeight - (padding * 2);
+        if (tagY < 0) {
+            tagY = y + 4;
+        }
+
+        // Fond de l'étiquette
+        DOM.canvasCtx.fillStyle = color;
+        DOM.canvasCtx.fillRect(x, tagY, textWidth + (padding * 2), textHeight + (padding * 2));
+
+        // Texte blanc contrasté
+        DOM.canvasCtx.fillStyle = '#ffffff';
+        DOM.canvasCtx.textBaseline = 'top';
+        DOM.canvasCtx.fillText(tagText, x + padding, tagY + padding);
+    });
+
+    AppState.currentDetectedCounts = counts;
+
+    // Mise à jour de l'affichage
+    renderDetectionPills(counts, predictions);
+    updateDashboard();
+    renderAuditTable();
+}
+
+/**
+ * Affiche la liste des objets détectés sous forme de pastilles (pills)
+ */
+function renderDetectionPills(counts, predictions) {
+    const keys = Object.keys(counts);
+
+    if (keys.length === 0) {
+        DOM.detectedItemsPills.innerHTML = '<span class="text-muted small italic">Aucun objet détecté avec le seuil actuel.</span>';
+        DOM.detectedBadgeCount.textContent = '0 catégorie';
+        return;
+    }
+
+    DOM.detectedBadgeCount.textContent = `${keys.length} catégorie${keys.length > 1 ? 's' : ''}`;
+    let html = '';
+
+    keys.forEach(key => {
+        const count = counts[key];
+        const labelFr = COCO_TRANSLATIONS_FR[key] || key;
+        const color = CATEGORY_COLORS[key] || '#64748b';
+
+        html += `
+            <div class="detection-pill shadow-xs">
+                <span class="legend-dot" style="background-color: ${color}"></span>
+                <span class="fw-semibold text-dark">${labelFr}</span>
+                <span class="pill-count">${count}</span>
+            </div>
+        `;
+    });
+
+    DOM.detectedItemsPills.innerHTML = html;
+}
+
+// ============================================================================
+// 8. TABLEAU DE BORD SYNTHÉTIQUE (FONCTIONNALITÉ D)
+// ============================================================================
+function updateDashboard() {
+    const counts = AppState.currentDetectedCounts;
+    const rules = AppState.auditRules;
+
+    // 1. Nombre total d'objets détectés (toutes catégories confondues)
+    let totalDetected = 0;
+    Object.values(counts).forEach(c => totalDetected += c);
+    DOM.kpiTotalDetected.textContent = totalDetected;
+
+    // 2. Nombre de catégories uniques reconnues
+    const categoriesCount = Object.keys(counts).length;
+    DOM.kpiCategoriesCount.textContent = categoriesCount;
+
+    // 3. Nombre de règles vérifiables configurées
+    const rulesCount = rules.length;
+    DOM.kpiRulesCount.textContent = rulesCount;
+
+    // 4. Nombre d'écarts observés sur les équipements audités
+    let discrepanciesCount = 0;
+    let hasDeficit = false;
+
+    rules.forEach(rule => {
+        const detected = counts[rule.key] || 0;
+        const diff = detected - rule.expected;
+        if (diff !== 0) {
+            discrepanciesCount++;
+            if (diff < 0) hasDeficit = true;
+        }
+    });
+
+    DOM.kpiDiscrepanciesCount.textContent = discrepanciesCount;
+
+    // Icône d'alerte des écarts
+    if (discrepanciesCount === 0 && AppState.isStreaming) {
+        DOM.kpiDiscrepanciesCount.className = 'fw-bold mb-0 text-success';
+        DOM.kpiDiscrepanciesIcon.className = 'metric-icon-bubble bg-success-subtle text-success';
+        DOM.kpiDiscrepanciesIcon.innerHTML = '<i class="bi bi-check-lg"></i>';
+    } else {
+        DOM.kpiDiscrepanciesCount.className = 'fw-bold mb-0 text-danger';
+        DOM.kpiDiscrepanciesIcon.className = 'metric-icon-bubble bg-danger-subtle text-danger';
+        DOM.kpiDiscrepanciesIcon.innerHTML = '<i class="bi bi-exclamation-triangle"></i>';
+    }
+
+    // 5. Statut global de l'audit
+    updateGlobalStatusBanner(discrepanciesCount, hasDeficit);
+}
+
+/**
+ * Met à jour la bannière synthétique du statut global d'audit
+ */
+function updateGlobalStatusBanner(discrepanciesCount, hasDeficit) {
+    const banner = DOM.globalStatusBanner;
+    const icon = DOM.globalStatusIcon;
+    const title = DOM.globalStatusTitle;
+    const desc = DOM.globalStatusDesc;
+
+    banner.className = 'audit-status-banner p-3 rounded-3 border mb-3 text-center transition-all';
+
+    if (!AppState.isStreaming && !AppState.isFrozen) {
+        banner.classList.add('bg-light');
+        icon.className = 'bi bi-shield-slash fs-4 text-secondary';
+        title.className = 'fw-bold mb-0 text-secondary';
+        title.textContent = 'Audit en Attente';
+        desc.textContent = 'Démarrez la caméra pour amorcer l\'analyse de conformité de la salle.';
+    } else if (discrepanciesCount === 0) {
+        banner.classList.add('status-ok');
+        icon.className = 'bi bi-shield-check fs-4 text-success';
+        title.className = 'fw-bold mb-0 text-success';
+        title.textContent = 'CONFORME — 100% DES RÈGLES RESPECTÉES';
+        desc.textContent = 'Tous les équipements attendus ont été intégralement détectés dans le champ de la caméra.';
+    } else if (hasDeficit) {
+        banner.classList.add('status-danger');
+        icon.className = 'bi bi-shield-exclamation fs-4 text-danger';
+        title.className = 'fw-bold mb-0 text-danger';
+        title.textContent = `NON CONFORME — ${discrepanciesCount} ÉCART(S) DÉTECTÉ(S)`;
+        desc.textContent = 'Certains équipements obligatoires sont manquants ou masqués par des obstacles.';
+    } else {
+        banner.classList.add('status-warning');
+        icon.className = 'bi bi-shield-shaded fs-4 text-warning';
+        title.className = 'fw-bold mb-0 text-warning';
+        title.textContent = `EXCÉDENT CONSTATÉ — ${discrepanciesCount} ÉQUIPEMENT(S) EN SURPLUS`;
+        desc.textContent = 'La quantité détectée dépasse l\'effectif théorique prévu (mobilier additionnel).';
+    }
+}
+
+// ============================================================================
+// 9. GESTION DU TABLEAU D'AUDIT ET CONFIGURATION THÉORIQUE (FONCTIONNALITÉ C)
+// ============================================================================
+
+/**
+ * Rend le tableau comparatif dynamique : Attendu vs Détecté vs Écart vs Statut
+ */
+function renderAuditTable() {
+    const tbody = DOM.auditTableBody;
+    const counts = AppState.currentDetectedCounts;
+
+    tbody.innerHTML = '';
+
+    AppState.auditRules.forEach((rule, index) => {
+        const detected = counts[rule.key] || 0;
+        const expected = rule.expected;
+        const diff = detected - expected;
+        const percent = expected > 0 ? Math.min(100, Math.round((detected / expected) * 100)) : 100;
+
+        // Détermination du badge et du statut
+        let badgeHtml = '';
+        let diffText = '';
+        let progressColor = 'bg-primary';
+
+        if (diff === 0) {
+            badgeHtml = `<span class="badge-conforme"><i class="bi bi-check-circle-fill"></i> Conforme</span>`;
+            diffText = `<span class="fw-bold text-success">0 (Idéal)</span>`;
+            progressColor = 'bg-success';
+        } else if (diff < 0) {
+            badgeHtml = `<span class="badge-deficit"><i class="bi bi-dash-circle-fill"></i> Manquant (${Math.abs(diff)})</span>`;
+            diffText = `<span class="fw-bold text-danger">${diff}</span>`;
+            progressColor = 'bg-danger';
+        } else {
+            badgeHtml = `<span class="badge-excedent"><i class="bi bi-plus-circle-fill"></i> Excédent (+${diff})</span>`;
+            diffText = `<span class="fw-bold text-warning">+${diff}</span>`;
+            progressColor = 'bg-warning';
+        }
+
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+            <td class="ps-3">
+                <div class="d-flex align-items-center gap-2">
+                    <div class="text-primary fs-5"><i class="bi ${rule.icon || 'bi-box'}"></i></div>
+                    <div>
+                        <div class="fw-bold text-dark">${rule.labelFr}</div>
+                        <div class="fs-xs text-muted font-monospace">${rule.key}</div>
+                    </div>
+                </div>
+            </td>
+            <td>
+                <div class="d-flex align-items-center gap-1">
+                    <input type="number" 
+                           class="form-control form-control-sm audit-qty-input" 
+                           value="${expected}" 
+                           min="0" 
+                           max="200" 
+                           data-rule-index="${index}"
+                           title="Modifier la quantité cible théorique">
+                    <span class="text-muted small">unités</span>
+                </div>
+            </td>
+            <td>
+                <div class="fs-6 fw-bold ${detected > 0 ? 'text-primary' : 'text-muted'}">
+                    ${detected}
+                </div>
+                <div class="fs-xs text-muted">à l'image</div>
+            </td>
+            <td>
+                ${diffText}
+            </td>
+            <td>
+                <div class="d-flex align-items-center gap-2">
+                    <div class="progress flex-grow-1" style="height: 8px;">
+                        <div class="progress-bar ${progressColor}" role="progressbar" style="width: ${percent}%;" aria-valuenow="${percent}" aria-valuemin="0" aria-valuemax="100"></div>
+                    </div>
+                    <span class="fs-xs fw-semibold text-muted font-monospace">${percent}%</span>
+                </div>
+            </td>
+            <td class="text-center">
+                ${badgeHtml}
+            </td>
+        `;
+
+        // Écouteur de modification directe de la quantité théorique par l'utilisateur
+        const input = tr.querySelector('.audit-qty-input');
+        input.addEventListener('change', (e) => {
+            const newQty = parseInt(e.target.value, 10);
+            if (!isNaN(newQty) && newQty >= 0) {
+                AppState.auditRules[index].expected = newQty;
+                updateDashboard();
+                renderAuditTable();
+            }
+        });
+
+        tbody.appendChild(tr);
+    });
+}
+
+/**
+ * Remplit le sélecteur du modal avec les catégories COCO-SSD disponibles
+ */
+function populateCategoryModalSelect() {
+    const select = DOM.newRuleCategorySelect;
+    select.innerHTML = '';
+
+    // Trier les classes par libellé français
+    const sortedEntries = Object.entries(COCO_TRANSLATIONS_FR).sort((a, b) => a[1].localeCompare(b[1]));
+
+    sortedEntries.forEach(([key, frLabel]) => {
+        const option = document.createElement('option');
+        option.value = key;
+        option.textContent = `${frLabel} (${key})`;
+        select.appendChild(option);
+    });
+}
+
+/**
+ * Traite l'ajout d'une nouvelle règle d'audit
+ */
+function handleAddNewRule() {
+    const categoryKey = DOM.newRuleCategorySelect.value;
+    const qty = parseInt(DOM.newRuleQuantityInput.value, 10);
+
+    if (isNaN(qty) || qty < 1) {
+        alert('Veuillez entrer une quantité valide supérieure ou égale à 1.');
+        return;
+    }
+
+    // Vérifier si la règle existe déjà
+    const existing = AppState.auditRules.find(r => r.key === categoryKey);
+    if (existing) {
+        existing.expected = qty;
+        showAlert(`La règle pour "${existing.labelFr}" a été mise à jour avec une cible de ${qty}.`, 'info', 3000);
+    } else {
+        const labelFr = COCO_TRANSLATIONS_FR[categoryKey] || categoryKey;
+        AppState.auditRules.push({
+            key: categoryKey,
+            labelFr: labelFr,
+            expected: qty,
+            icon: 'bi-box-seam',
+            note: 'Règle personnalisée ajoutée'
+        });
+        showAlert(`Nouvelle règle d'audit ajoutée : ${qty} x ${labelFr}.`, 'success', 3000);
+    }
+
+    // Fermer le modal Bootstrap
+    const modalElement = document.getElementById('addRuleModal');
+    const modalInstance = bootstrap.Modal.getInstance(modalElement);
+    if (modalInstance) {
+        modalInstance.hide();
+    }
+
+    renderAuditTable();
+    updateDashboard();
+}
+
+// ============================================================================
+// 10. GÉNÉRATION & EXPORT DU RAPPORT D'AUDIT (FONCTIONNALITÉ E)
+// ============================================================================
+
+/**
+ * Génère le contenu textuel complet du rapport d'audit officiel
+ */
+function buildFullReportText() {
+    const now = new Date();
+    const formattedDate = now.toLocaleDateString('fr-FR', {
+        weekday: 'long', year: 'numeric', month: 'long', day: 'numeric'
+    });
+    const formattedTime = now.toLocaleTimeString('fr-FR', {
+        hour: '2-digit', minute: '2-digit', second: '2-digit'
+    });
+
+    const counts = AppState.currentDetectedCounts;
+    const rules = AppState.auditRules;
+
+    // Calculs de synthèse
+    let totalDetected = 0;
+    Object.values(counts).forEach(c => totalDetected += c);
+
+    let totalDiscrepancies = 0;
+    let conformingRules = 0;
+    const tableRows = [];
+    const identifiedGaps = [];
+
+    rules.forEach(rule => {
+        const observed = counts[rule.key] || 0;
+        const expected = rule.expected;
+        const diff = observed - expected;
+        let status = 'CONFORME';
+
+        if (diff === 0) {
+            conformingRules++;
+        } else if (diff < 0) {
+            totalDiscrepancies++;
+            status = `DÉFICIT (${diff})`;
+            identifiedGaps.push(`- ${rule.labelFr} (${rule.key}) : ${observed} observés sur ${expected} requis (Manque : ${Math.abs(diff)})`);
+        } else {
+            totalDiscrepancies++;
+            status = `EXCÉDENT (+${diff})`;
+            identifiedGaps.push(`- ${rule.labelFr} (${rule.key}) : ${observed} observés sur ${expected} prévus (+${diff} en surplus)`);
+        }
+
+        tableRows.push(
+            `| ${padRight(rule.labelFr, 25)} | ${padRight(String(expected), 10)} | ${padRight(String(observed), 10)} | ${padRight((diff > 0 ? '+' : '') + diff, 8)} | ${padRight(status, 16)} |`
+        );
+    });
+
+    // Catégories non soumises à l'audit détectées
+    const auditKeys = new Set(rules.map(r => r.key));
+    const unmonitoredDetected = [];
+    Object.entries(counts).forEach(([k, count]) => {
+        if (!auditKeys.has(k)) {
+            const labelFr = COCO_TRANSLATIONS_FR[k] || k;
+            unmonitoredDetected.push(`${labelFr} (${k}) : ${count}`);
+        }
+    });
+
+    const complianceRate = rules.length > 0 ? Math.round((conformingRules / rules.length) * 100) : 100;
+    const globalVerdict = totalDiscrepancies === 0 
+        ? 'CONFORME — Le parc d\'équipements est en adéquation totale avec la dotation officielle.'
+        : `ATTENTION : NON CONFORME — ${totalDiscrepancies} divergence(s) identifiée(s) nécessitant vérification.`;
+
+    // Assemblage du rapport structuré
+    const report = 
+`================================================================================
+                    RAPPORT OFFICIEL D'AUDIT DE SALLE DE CLASSE
+                      ÉCOLE D'INGÉNIEURS EPITA — PROJET SMART CLASSROOM
+================================================================================
+
+1. CONTEXTE DE L'INSPECTION
+--------------------------------------------------------------------------------
+- Date de l'audit        : ${formattedDate}
+- Heure de prélèvement   : ${formattedTime}
+- Auditeur en charge     : Omar CORTY - EPITA ING3 GITM
+- Module académique      : AI for Project Management
+- Salle auditée          : Salle de cours standard (EPITA Campus Kremlin-Bicêtre)
+- Système de vision      : EPITA Smart Classroom v1.0 (Edge In-Browser Vision)
+- Modèle de détection    : TensorFlow.js & COCO-SSD (Lite MobileNet v2)
+- Seuil de confiance IA  : ${Math.round(AppState.confidenceThreshold * 100)}%
+- Mode de prélèvement    : ${AppState.isFrozen ? 'Instantané figé haute fidélité' : 'Analyse temps réel caméra'}
+
+2. SYNTHÈSE GLOBALE & VERDICT
+--------------------------------------------------------------------------------
+- Statut global d'audit  : ${globalVerdict}
+- Taux de conformité     : ${complianceRate}% (${conformingRules}/${rules.length} règles satisfaites)
+- Total objets détectés  : ${totalDetected}
+- Nombre d'écarts        : ${totalDiscrepancies} équipement(s) avec divergence
+
+3. TABLEAU COMPARATIF : ATTENDU vs OBSERVÉ
+--------------------------------------------------------------------------------
+| Équipement audité         | Attendu    | Observé    | Écart    | Statut           |
++---------------------------+------------+------------+----------+------------------+
+${tableRows.join('\n')}
+--------------------------------------------------------------------------------
+
+4. DÉTAIL DES ÉCARTS IDENTIFIÉS
+--------------------------------------------------------------------------------
+${identifiedGaps.length > 0 ? identifiedGaps.join('\n') : 'Aucun écart quantitatif détecté. L\'ensemble des quotas est rigoureusement respecté.'}
+
+5. OBJETS TIERS DÉTECTÉS HORS RÉFÉRENTIEL D'AUDIT
+--------------------------------------------------------------------------------
+${unmonitoredDetected.length > 0 
+    ? unmonitoredDetected.map(item => `- ${item}`).join('\n')
+    : 'Aucun objet tiers détecté en dehors des équipements de la salle de classe.'}
+
+6. CATÉGORIES DE SALLE NON PRISES EN CHARGE PAR LE MODÈLE
+--------------------------------------------------------------------------------
+Le modèle générique COCO-SSD est entraîné sur 80 classes du quotidien. Certaines 
+infrastructures spécifiques d'une salle de classe moderne ne sont pas reconnues :
+- Vidéoprojecteurs montés au plafond
+- Tableaux blancs effaçables traditionnels (Velleda) sans cadre moniteur
+- Boîtiers multiprises intégrés aux tables
+- Systèmes de visioconférence et caméras d'ambiance
+- Climatisation, radiateurs et extincteurs normalisés
+
+7. LIMITES TECHNIQUES DE L'ANALYSE PAR VISION
+--------------------------------------------------------------------------------
+IMPORTANT — Nuance méthodologique fondamentale :
+Un équipement non détecté par le système n'est PAS obligatoirement absent de la 
+salle. Les facteurs suivants peuvent limiter l'inférence :
+a) Angle de vue & Champ optique : Les caméras conventionnelles ont un angle 
+   restreint (~70° à 90°) excluant les rangées arrière ou les angles morts.
+b) Occlusion géométrique : Les chaises glissées sous les tables ou des sacs posés
+   sur les bureaux masquent les formes clés des assises et plateaux.
+c) Éclairage & Contre-jour : Les réflexions sur les baies vitrées ou zones 
+   d'ombre réduisent l'indice de confiance du modèle MobileNet.
+d) Assimilation sémantique : La classe COCO-SSD 'tv' sert ici de substitut 
+   sémantique pour les tableaux interactifs (Smartboards) et écrans de projection.
+
+8. RECOMMANDATIONS OPÉRATIONNELLES POUR LE GESTIONNAIRE
+--------------------------------------------------------------------------------
+1. Réaliser un balayage panoramique lent de la pièce avec la webcam pour couvrir 
+   la totalité des 360° avant de valider l'inventaire définitif.
+2. Déplacer temporairement les chaises masquées pour les rendre visibles à l'objectif.
+3. En cas de doute persistant sur un écart négatif (déficit), effectuer une levée
+   de doute manuelle avant tout déclenchement d'une procédure de réapprovisionnement.
+4. Ajuster le curseur de sensibilité (seuil de confiance) à 40%-50% pour les 
+   environnements de classe volumineux.
+
+================================================================================
+Rapport généré automatiquement par l'application EPITA Smart Classroom
+Conçu par Omar CORTY - EPITA GITM - AI for Project Management
+================================================================================`;
+
+    return report;
+}
+
+/**
+ * Met à jour la zone de prévisualisation du rapport dans l'interface
+ */
+function generateReportPreview() {
+    const reportText = buildFullReportText();
+    DOM.reportContentArea.textContent = reportText;
+}
+
+/**
+ * Copie le rapport d'audit dans le presse-papier de l'utilisateur
+ */
+async function copyReportToClipboard() {
+    const reportText = buildFullReportText();
+    try {
+        await navigator.clipboard.writeText(reportText);
+        showAlert('Rapport d\'audit copié dans le presse-papier !', 'success', 2500);
+    } catch (err) {
+        console.warn('Clipboard API non supportée ou refusée, fallback...', err);
+        // Fallback avec textarea temporaire
+        const textarea = document.createElement('textarea');
+        textarea.value = reportText;
+        document.body.appendChild(textarea);
+        textarea.select();
+        document.execCommand('copy');
+        document.body.removeChild(textarea);
+        showAlert('Rapport d\'audit copié dans le presse-papier !', 'success', 2500);
+    }
+}
+
+/**
+ * Télécharge le rapport d'audit sous forme de fichier .txt horodaté
+ */
+function downloadReportFile() {
+    const reportText = buildFullReportText();
+    const dateStr = new Date().toISOString().slice(0, 10);
+    const fileName = `Rapport_Audit_EPITA_Smart_Classroom_${dateStr}.txt`;
+
+    const blob = new Blob([reportText], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = fileName;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+
+    showAlert(`Fichier "${fileName}" téléchargé avec succès !`, 'success', 3000);
+}
+
+// ============================================================================
+// 11. UTILITAIRES DIVERS (ALERTES, COULEURS, FORMATAGE)
+// ============================================================================
+
+/**
+ * Affiche une notification d'alerte dismissible Bootstrap
+ */
+function showAlert(message, type = 'info', timeoutMs = 5000) {
+    const alertId = `alert-${Date.now()}`;
+    const iconClass = type === 'success' ? 'bi-check-circle-fill' :
+                      type === 'warning' ? 'bi-exclamation-circle-fill' :
+                      type === 'danger'  ? 'bi-slash-circle-fill' : 'bi-info-circle-fill';
+
+    const alertHtml = `
+        <div id="${alertId}" class="alert alert-${type} alert-dismissible fade show d-flex align-items-center gap-2 shadow-sm" role="alert">
+            <i class="bi ${iconClass} fs-5"></i>
+            <div class="flex-grow-1">${message}</div>
+            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Fermer"></button>
+        </div>
+    `;
+
+    DOM.alertContainer.insertAdjacentHTML('beforeend', alertHtml);
+
+    if (timeoutMs > 0) {
+        setTimeout(() => {
+            const el = document.getElementById(alertId);
+            if (el) {
+                const alertInstance = bootstrap.Alert.getOrCreateInstance(el);
+                alertInstance.close();
+            }
+        }, timeoutMs);
+    }
+}
+
+/**
+ * Convertit un code couleur Hexadécimal en RGBA avec opacité
+ */
+function hexToRgba(hex, alpha = 1) {
+    let cleanHex = hex.replace('#', '');
+    if (cleanHex.length === 3) {
+        cleanHex = cleanHex.split('').map(c => c + c).join('');
+    }
+    const r = parseInt(cleanHex.substring(0, 2), 16) || 0;
+    const g = parseInt(cleanHex.substring(2, 4), 16) || 0;
+    const b = parseInt(cleanHex.substring(4, 6), 16) || 0;
+    return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
+
+/**
+ * Complète une chaîne avec des espaces à droite pour alignement monospace
+ */
+function padRight(str, length) {
+    const s = String(str);
+    if (s.length >= length) return s.slice(0, length);
+    return s + ' '.repeat(length - s.length);
+}

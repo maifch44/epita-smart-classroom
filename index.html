@@ -1,0 +1,467 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>EPITA Smart Classroom — Audit Intelligent de Salle par Vision IA</title>
+    
+    <!-- Meta SEO & Infos -->
+    <meta name="description" content="Solution d'audit automatisé et d'inventaire intelligent de salle de classe par vision artificielle dans le navigateur avec TensorFlow.js et COCO-SSD.">
+    <meta name="author" content="Omar CORTY - EPITA GITM">
+
+    <!-- Bootstrap 5 CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <!-- Bootstrap Icons -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
+    
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+
+    <!-- Feuille de styles personnalisée -->
+    <link rel="stylesheet" href="style.css">
+
+    <!-- TensorFlow.js et modèle COCO-SSD via CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.20.0/dist/tf.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd@2.2.3/dist/coco-ssd.min.js"></script>
+</head>
+<body class="bg-light">
+
+    <!-- Barre de Navigation Supérieure -->
+    <header class="navbar navbar-expand-lg navbar-dark bg-epita-navy sticky-top shadow-sm py-2">
+        <div class="container-fluid px-lg-4">
+            <a class="navbar-brand d-flex align-items-center gap-2" href="#">
+                <span class="badge bg-epita-blue text-white fw-bold px-2 py-1 fs-6">EPITA</span>
+                <span class="fw-bold tracking-tight">Smart Classroom</span>
+                <span class="badge bg-secondary-subtle text-secondary-emphasis fs-xs d-none d-sm-inline">Vision IA Edge</span>
+            </a>
+
+            <!-- Indicateurs de statut du modèle & Caméra -->
+            <div class="d-flex align-items-center gap-3 ms-auto">
+                <div id="modelStatusBadge" class="badge bg-warning-subtle text-warning border border-warning-subtle d-flex align-items-center gap-1 px-3 py-2">
+                    <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
+                    <span id="modelStatusText">Chargement du modèle IA...</span>
+                </div>
+                <div id="cameraStatusBadge" class="badge bg-secondary-subtle text-secondary border d-none d-md-flex align-items-center gap-1 px-3 py-2">
+                    <i class="bi bi-camera-video-off"></i>
+                    <span id="cameraStatusText">Caméra arrêtée</span>
+                </div>
+                <a href="#audit-report-section" class="btn btn-sm btn-outline-light d-none d-lg-inline-flex align-items-center gap-1">
+                    <i class="bi bi-file-earmark-text"></i> Rapport d'audit
+                </a>
+            </div>
+        </div>
+    </header>
+
+    <!-- Section Présentation & Contexte du Projet -->
+    <section class="hero-section bg-epita-dark text-white py-4 py-lg-5 mb-4 border-bottom">
+        <div class="container-fluid px-lg-4">
+            <div class="row align-items-center g-4">
+                <div class="col-lg-8">
+                    <div class="d-inline-flex align-items-center gap-2 badge bg-primary-subtle text-primary-emphasis mb-2 px-3 py-1 rounded-pill">
+                        <i class="bi bi-cpu"></i> IA for Project Management — EPITA ING3 GITM
+                    </div>
+                    <h1 class="display-6 fw-extrabold text-white mb-2">Audit Intelligent & Inventaire de Salle de Classe</h1>
+                    <p class="lead text-white-50 mb-3 fs-6">
+                        Système temps réel d'analyse de conformité des équipements pédagogiques par vision par ordinateur (<strong class="text-white">TensorFlow.js</strong> &amp; <strong class="text-white">COCO-SSD</strong>). Toutes les inférences s'exécutent localement dans votre navigateur pour une confidentialité totale.
+                    </p>
+                    <div class="d-flex flex-wrap gap-2 text-white-50 fs-xs">
+                        <span class="d-flex align-items-center gap-1"><i class="bi bi-shield-check text-success"></i> Traitement 100% Edge / Local</span>
+                        <span class="text-white-25">•</span>
+                        <span class="d-flex align-items-center gap-1"><i class="bi bi-speedometer text-info"></i> Inférence temps réel sans serveur</span>
+                        <span class="text-white-25">•</span>
+                        <span class="d-flex align-items-center gap-1"><i class="bi bi-person-badge text-warning"></i> Omar CORTY - EPITA GITM</span>
+                    </div>
+                </div>
+                <div class="col-lg-4">
+                    <div class="card bg-white bg-opacity-10 border-0 text-white p-3 rounded-3 shadow-sm backdrop-blur">
+                        <h6 class="fw-semibold text-uppercase fs-xs tracking-wider text-info mb-2 d-flex align-items-center gap-1">
+                            <i class="bi bi-info-circle-fill"></i> Rappel Méthodologique
+                        </h6>
+                        <p class="small mb-0 text-white-75">
+                            <strong>Note d'audit :</strong> Un équipement non détecté peut être temporairement occulté par un autre objet, hors du champ de vision de la webcam ou sous un éclairage défavorable. Il n'est donc <em>pas systématiquement absent</em> de la salle.
+                        </p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Conteneur Principal de l'Application -->
+    <main class="container-fluid px-lg-4 pb-5">
+        
+        <!-- Messages d'Alerte Dynamiques -->
+        <div id="alertContainer"></div>
+
+        <!-- LIGNE 1 : FLUX VIDÉO & CONTRÔLE (GAUCHE) + TABLEAU DE BORD SYNTHÉTIQUE (DROITE) -->
+        <div class="row g-4 mb-4">
+            
+            <!-- Colonne Gauche : Flux Caméra & Commandes Directes -->
+            <div class="col-xl-7 col-lg-6">
+                <div class="card shadow-sm border-0 h-100">
+                    <div class="card-header bg-white py-3 d-flex flex-wrap align-items-center justify-content-between gap-2 border-bottom">
+                        <div class="d-flex align-items-center gap-2">
+                            <i class="bi bi-webcam text-primary fs-5"></i>
+                            <h5 class="card-title mb-0 fw-bold">Flux Caméra &amp; Détection IA</h5>
+                        </div>
+                        <div class="d-flex align-items-center gap-2">
+                            <span id="fpsCounter" class="badge bg-dark-subtle text-dark font-monospace fs-xs">0 FPS</span>
+                            <span id="latencyCounter" class="badge bg-light text-secondary border font-monospace fs-xs">0 ms</span>
+                        </div>
+                    </div>
+                    
+                    <div class="card-body p-3">
+                        <!-- Zone d'affichage vidéo + Canvas Overlay superposé -->
+                        <div class="camera-stage-wrapper position-relative rounded-3 overflow-hidden bg-black shadow-inner">
+                            <video id="webcam" playsinline muted autoplay></video>
+                            <canvas id="canvasOverlay"></canvas>
+                            
+                            <!-- Écran d'accueil quand la caméra est éteinte -->
+                            <div id="cameraStandbyScreen" class="camera-overlay-placeholder d-flex flex-column align-items-center justify-content-center text-center p-4">
+                                <div class="standby-icon-box mb-3 text-secondary">
+                                    <i class="bi bi-camera-video fs-1"></i>
+                                </div>
+                                <h6 class="text-white fw-bold mb-1">Caméra désactivée</h6>
+                                <p class="text-white-50 small mb-3 max-w-sm">
+                                    Cliquez sur "Démarrer la caméra" ci-dessous pour lancer l'analyse en direct de la salle de classe.
+                                </p>
+                                <button id="btnStartCameraOverlay" class="btn btn-primary px-4 py-2 d-inline-flex align-items-center gap-2" disabled>
+                                    <span class="spinner-border spinner-border-sm d-none" id="overlayBtnSpinner"></span>
+                                    <i class="bi bi-play-circle-fill"></i> Démarrer la caméra
+                                </button>
+                            </div>
+
+                            <!-- Bandeau d'état d'inférence en direct -->
+                            <div id="liveFeedTag" class="position-absolute top-0 start-0 m-2 badge bg-danger text-white d-none align-items-center gap-1 shadow-sm px-2 py-1">
+                                <span class="pulse-indicator"></span> DIRECT
+                            </div>
+
+                            <!-- Indicateur de gel d'image -->
+                            <div id="freezeIndicator" class="position-absolute top-0 end-0 m-2 badge bg-warning text-dark d-none align-items-center gap-1 shadow-sm px-2 py-1">
+                                <i class="bi bi-pause-circle-fill"></i> IMAGE FIGÉE
+                            </div>
+                        </div>
+
+                        <!-- Barre de Commandes de la Caméra -->
+                        <div class="camera-controls-bar mt-3 p-3 bg-light rounded-3 border d-flex flex-wrap align-items-center justify-content-between gap-3">
+                            <div class="btn-group" role="group" aria-label="Contrôles caméra">
+                                <button id="btnStartCamera" class="btn btn-primary d-inline-flex align-items-center gap-2" disabled>
+                                    <i class="bi bi-play-fill fs-5"></i>
+                                    <span>Démarrer</span>
+                                </button>
+                                <button id="btnFreezeFrame" class="btn btn-outline-secondary d-inline-flex align-items-center gap-2" disabled>
+                                    <i class="bi bi-camera fs-6"></i>
+                                    <span id="freezeBtnText">Figer / Capturer</span>
+                                </button>
+                                <button id="btnStopCamera" class="btn btn-outline-danger d-inline-flex align-items-center gap-2" disabled>
+                                    <i class="bi bi-stop-fill fs-5"></i>
+                                    <span>Arrêter</span>
+                                </button>
+                            </div>
+
+                            <!-- Sélecteur de périphérique vidéo si multi-caméras -->
+                            <div class="d-flex align-items-center gap-2 flex-grow-1 flex-md-grow-0 min-w-200">
+                                <label for="cameraSelect" class="form-label mb-0 small text-muted text-nowrap"><i class="bi bi-camera"></i> Source :</label>
+                                <select id="cameraSelect" class="form-select form-select-sm" disabled>
+                                    <option value="">Caméra par défaut</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <!-- Paramétrage du seuil de confiance (Slider Fonctionnalité B) -->
+                        <div class="mt-3 p-3 bg-white rounded-3 border">
+                            <div class="d-flex justify-content-between align-items-center mb-1">
+                                <label for="confidenceRange" class="form-label mb-0 fw-semibold fs-sm d-flex align-items-center gap-1">
+                                    <i class="bi bi-sliders2 text-primary"></i> Seuil de confiance minimal :
+                                </label>
+                                <span id="confidenceValueDisplay" class="badge bg-primary font-monospace fs-6 px-2 py-1">50%</span>
+                            </div>
+                            <input type="range" class="form-range" id="confidenceRange" min="15" max="95" step="5" value="50">
+                            <div class="d-flex justify-content-between text-muted fs-xs">
+                                <span>15% (Plus sensible, risque de faux positifs)</span>
+                                <span>50% (Recommandé)</span>
+                                <span>95% (Très strict)</span>
+                            </div>
+                        </div>
+
+                    </div>
+                </div>
+            </div>
+
+            <!-- Colonne Droite : Tableau de bord Synthétique (Fonctionnalité D) -->
+            <div class="col-xl-5 col-lg-6">
+                <div class="card shadow-sm border-0 h-100">
+                    <div class="card-header bg-white py-3 d-flex align-items-center justify-content-between border-bottom">
+                        <div class="d-flex align-items-center gap-2">
+                            <i class="bi bi-speedometer2 text-primary fs-5"></i>
+                            <h5 class="card-title mb-0 fw-bold">Tableau de Bord Synthétique</h5>
+                        </div>
+                        <span class="badge bg-info-subtle text-info-emphasis border fs-xs">Temps Réel</span>
+                    </div>
+
+                    <div class="card-body p-3 d-flex flex-column justify-content-between">
+                        
+                        <!-- 4 Tuiles Métriques (KPIs) -->
+                        <div class="row g-3 mb-3">
+                            <!-- KPI 1: Objets détectés -->
+                            <div class="col-sm-6">
+                                <div class="metric-card p-3 rounded-3 border bg-light h-100">
+                                    <div class="d-flex justify-content-between align-items-start">
+                                        <span class="text-muted fs-xs fw-semibold text-uppercase">Total Détecté</span>
+                                        <div class="metric-icon-bubble bg-primary-subtle text-primary">
+                                            <i class="bi bi-boxes"></i>
+                                        </div>
+                                    </div>
+                                    <div class="mt-2">
+                                        <h2 id="kpiTotalDetected" class="fw-bold mb-0 text-dark">0</h2>
+                                        <span class="text-muted fs-xs">objets visibles à l'image</span>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- KPI 2: Catégories reconnues -->
+                            <div class="col-sm-6">
+                                <div class="metric-card p-3 rounded-3 border bg-light h-100">
+                                    <div class="d-flex justify-content-between align-items-start">
+                                        <span class="text-muted fs-xs fw-semibold text-uppercase">Catégories</span>
+                                        <div class="metric-icon-bubble bg-info-subtle text-info">
+                                            <i class="bi bi-tags"></i>
+                                        </div>
+                                    </div>
+                                    <div class="mt-2">
+                                        <h2 id="kpiCategoriesCount" class="fw-bold mb-0 text-dark">0</h2>
+                                        <span class="text-muted fs-xs">classes COCO-SSD actives</span>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- KPI 3: Règles vérifiables -->
+                            <div class="col-sm-6">
+                                <div class="metric-card p-3 rounded-3 border bg-light h-100">
+                                    <div class="d-flex justify-content-between align-items-start">
+                                        <span class="text-muted fs-xs fw-semibold text-uppercase">Règles Auditées</span>
+                                        <div class="metric-icon-bubble bg-secondary-subtle text-secondary">
+                                            <i class="bi bi-check2-circle"></i>
+                                        </div>
+                                    </div>
+                                    <div class="mt-2">
+                                        <h2 id="kpiRulesCount" class="fw-bold mb-0 text-dark">4</h2>
+                                        <span class="text-muted fs-xs">équipements sous contrôle</span>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- KPI 4: Nombre d'écarts observés -->
+                            <div class="col-sm-6">
+                                <div class="metric-card p-3 rounded-3 border bg-light h-100">
+                                    <div class="d-flex justify-content-between align-items-start">
+                                        <span class="text-muted fs-xs fw-semibold text-uppercase">Écarts Observés</span>
+                                        <div class="metric-icon-bubble bg-danger-subtle text-danger" id="kpiDiscrepanciesIcon">
+                                            <i class="bi bi-exclamation-triangle"></i>
+                                        </div>
+                                    </div>
+                                    <div class="mt-2">
+                                        <h2 id="kpiDiscrepanciesCount" class="fw-bold mb-0 text-danger">0</h2>
+                                        <span class="text-muted fs-xs">anomalies quantitatives</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Statut Global de l'Audit -->
+                        <div class="audit-status-banner p-3 rounded-3 border mb-3 text-center transition-all" id="globalStatusBanner">
+                            <div class="d-flex align-items-center justify-content-center gap-2 mb-1">
+                                <i id="globalStatusIcon" class="bi bi-shield-slash fs-4 text-secondary"></i>
+                                <h5 id="globalStatusTitle" class="fw-bold mb-0 text-secondary">Audit en Attente</h5>
+                            </div>
+                            <p id="globalStatusDesc" class="small text-muted mb-0">
+                                Démarrez la caméra pour amorcer l'analyse de conformité de la salle.
+                            </p>
+                        </div>
+
+                        <!-- Liste Dynamique des Détections Temps Réel -->
+                        <div class="active-detections-list border rounded-3 p-3 bg-white flex-grow-1">
+                            <div class="d-flex justify-content-between align-items-center mb-2 pb-1 border-bottom">
+                                <span class="fw-semibold fs-xs text-uppercase text-muted">
+                                    <i class="bi bi-eye"></i> Inventaire Détecté en Direct
+                                </span>
+                                <span id="detectedBadgeCount" class="badge bg-primary-subtle text-primary fs-xs">0 catégorie</span>
+                            </div>
+                            <div id="detectedItemsPills" class="d-flex flex-wrap gap-2 py-1 max-h-160 overflow-y-auto">
+                                <span class="text-muted small italic">Aucun objet détecté pour l'instant.</span>
+                            </div>
+                        </div>
+
+                    </div>
+                </div>
+            </div>
+
+        </div>
+
+        <!-- LIGNE 2 : AUDIT DÉTAILLÉ DE LA SALLE & CONFIGURATION THÉORIQUE (Fonctionnalité C) -->
+        <div class="row g-4 mb-4">
+            <div class="col-12">
+                <div class="card shadow-sm border-0">
+                    <div class="card-header bg-white py-3 d-flex flex-wrap align-items-center justify-content-between gap-2 border-bottom">
+                        <div>
+                            <h5 class="card-title mb-0 fw-bold d-flex align-items-center gap-2">
+                                <i class="bi bi-clipboard-data text-primary"></i>
+                                Audit de Conformité de la Salle — Comparatif Théorique vs Réel
+                            </h5>
+                            <span class="text-muted fs-xs">
+                                Vous pouvez modifier directement les quantités théoriques cibles ci-dessous selon la configuration officielle de votre salle.
+                            </span>
+                        </div>
+                        <div class="d-flex align-items-center gap-2">
+                            <button id="btnResetConfig" class="btn btn-sm btn-outline-secondary d-inline-flex align-items-center gap-1" title="Rétablir 10 tables, 20 chaises, 1 tableau, 5 ordinateurs">
+                                <i class="bi bi-arrow-counterclockwise"></i> Valeurs par défaut
+                            </button>
+                            <button id="btnOpenAddRuleModal" class="btn btn-sm btn-primary d-inline-flex align-items-center gap-1" data-bs-toggle="modal" data-bs-target="#addRuleModal">
+                                <i class="bi bi-plus-lg"></i> Ajouter une règle
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="card-body p-0">
+                        <div class="table-responsive">
+                            <table class="table table-hover align-middle mb-0 audit-table" id="auditTable">
+                                <thead class="table-light">
+                                    <tr class="fs-xs text-uppercase text-muted">
+                                        <th scope="col" class="ps-3" style="width: 28%;">Équipement Pédagogique</th>
+                                        <th scope="col" style="width: 16%;">Attendu (Théorique)</th>
+                                        <th scope="col" style="width: 14%;">Détecté (IA)</th>
+                                        <th scope="col" style="width: 14%;">Écart</th>
+                                        <th scope="col" style="width: 16%;">Taux d'Atteinte</th>
+                                        <th scope="col" class="text-center" style="width: 12%;">Statut</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="auditTableBody">
+                                    <!-- Rempli dynamiquement par app.js -->
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <div class="card-footer bg-light py-2 px-3 border-top d-flex flex-wrap justify-content-between align-items-center gap-2 fs-xs text-muted">
+                        <div class="d-flex align-items-center gap-3">
+                            <span class="d-inline-flex align-items-center gap-1"><span class="legend-dot bg-success"></span> Conforme (quantité atteinte)</span>
+                            <span class="d-inline-flex align-items-center gap-1"><span class="legend-dot bg-danger"></span> Déficit (quantité manquante)</span>
+                            <span class="d-inline-flex align-items-center gap-1"><span class="legend-dot bg-warning"></span> Excédent (quantité supérieure)</span>
+                        </div>
+                        <div class="d-flex align-items-center gap-1">
+                            <i class="bi bi-shield-exclamation text-warning"></i> Rappel : Écart ≠ Vol (occlusion possible)
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- LIGNE 3 : RAPPORT D'AUDIT COMPLET (Fonctionnalité E) -->
+        <div class="row g-4" id="audit-report-section">
+            <div class="col-12">
+                <div class="card shadow-sm border-0">
+                    <div class="card-header bg-white py-3 d-flex flex-wrap align-items-center justify-content-between gap-3 border-bottom">
+                        <div class="d-flex align-items-center gap-2">
+                            <i class="bi bi-file-earmark-ruled text-primary fs-5"></i>
+                            <div>
+                                <h5 class="card-title mb-0 fw-bold">Rapport d'Audit Officiel</h5>
+                                <span class="text-muted fs-xs">Document synthétique d'inspection généré pour le gestionnaire de parc</span>
+                            </div>
+                        </div>
+
+                        <!-- Boutons d'Action pour le Rapport -->
+                        <div class="d-flex flex-wrap align-items-center gap-2">
+                            <button id="btnGenerateReport" class="btn btn-sm btn-primary d-inline-flex align-items-center gap-1">
+                                <i class="bi bi-arrow-repeat"></i> Actualiser le rapport
+                            </button>
+                            <button id="btnCopyReport" class="btn btn-sm btn-outline-secondary d-inline-flex align-items-center gap-1" title="Copier le texte brut">
+                                <i class="bi bi-clipboard"></i> Copier
+                            </button>
+                            <button id="btnDownloadReport" class="btn btn-sm btn-outline-success d-inline-flex align-items-center gap-1" title="Télécharger au format texte .txt">
+                                <i class="bi bi-download"></i> Télécharger (.txt)
+                            </button>
+                            <button id="btnPrintReport" class="btn btn-sm btn-outline-dark d-inline-flex align-items-center gap-1" title="Imprimer ou exporter en PDF">
+                                <i class="bi bi-printer"></i> Imprimer / PDF
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="card-body p-4 bg-light">
+                        <!-- Prévisualisation stylisée du rapport d'audit -->
+                        <div class="report-paper-container bg-white p-4 p-md-5 rounded-3 shadow-sm border font-monospace">
+                            <pre id="reportContentArea" class="report-pre-content mb-0">Rapport en attente de génération. Cliquez sur "Actualiser le rapport" pour compiler les données actuelles de la caméra et de l'audit.</pre>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+    </main>
+
+    <!-- Modal : Ajouter une règle d'audit personnalisée -->
+    <div class="modal fade" id="addRuleModal" tabindex="-1" aria-labelledby="addRuleModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h6 class="modal-title fw-bold" id="addRuleModalLabel">
+                        <i class="bi bi-plus-circle text-primary"></i> Ajouter un équipement à auditer
+                    </h6>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Fermer"></button>
+                </div>
+                <div class="modal-body">
+                    <p class="small text-muted mb-3">
+                        Sélectionnez une catégorie compatible reconnue par le modèle COCO-SSD et définissez la quantité attendue dans la salle.
+                    </p>
+                    <div class="mb-3">
+                        <label for="newRuleCategorySelect" class="form-label fw-semibold fs-sm">Catégorie COCO-SSD :</label>
+                        <select id="newRuleCategorySelect" class="form-select">
+                            <!-- Options injectées dynamiquement par JS -->
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label for="newRuleQuantityInput" class="form-label fw-semibold fs-sm">Quantité attendue (théorique) :</label>
+                        <input type="number" id="newRuleQuantityInput" class="form-control" min="1" max="100" value="1">
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">Annuler</button>
+                    <button type="button" id="btnAddRuleConfirm" class="btn btn-primary btn-sm">Ajouter à l'audit</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Footer de l'Application -->
+    <footer class="bg-epita-navy text-white-50 py-4 border-top">
+        <div class="container-fluid px-lg-4 text-center text-md-start">
+            <div class="row align-items-center g-3">
+                <div class="col-md-6">
+                    <p class="mb-0 small">
+                        <strong class="text-white">EPITA Smart Classroom</strong> — Module <em>AI for Project Management</em> (ING3 GITM)
+                    </p>
+                    <p class="mb-0 fs-xs text-white-50">
+                        Conçu et développé par <strong class="text-white">Omar CORTY</strong> &bull; Modèle de vision Edge COCO-SSD / TensorFlow.js
+                    </p>
+                </div>
+                <div class="col-md-6 text-md-end">
+                    <div class="d-inline-flex align-items-center gap-3 fs-sm">
+                        <span class="badge bg-success-subtle text-success border border-success-subtle">
+                            <i class="bi bi-shield-lock"></i> 100% In-Browser Privacy
+                        </span>
+                        <a href="https://github.com/tensorflow/tfjs-models/tree/master/coco-ssd" target="_blank" rel="noopener" class="text-white-50 text-decoration-none hover-white">
+                            <i class="bi bi-github"></i> COCO-SSD Doc
+                        </a>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </footer>
+
+    <!-- Bootstrap 5 Bundle JS (avec Popper) -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+    
+    <!-- Script Principal de l'Application -->
+    <script src="app.js"></script>
+</body>
+</html>
