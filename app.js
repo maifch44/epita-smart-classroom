@@ -370,17 +370,10 @@ async function loadCocoSsdModel() {
     try {
         updateModelStatus('loading', 'Chargement du modèle COCO-SSD...');
         
-        // Chargement du modèle coco-ssd (mobilenet_v2 pour meilleure acuité sur les chaises, fallback lite)
-        try {
-            AppState.model = await cocoSsd.load({
-                base: 'mobilenet_v2' // Résolution et mAP supérieures pour petits objets / occlusions
-            });
-        } catch (loadErr) {
-            console.warn('Fallback vers lite_mobilenet_v2 :', loadErr);
-            AppState.model = await cocoSsd.load({
-                base: 'lite_mobilenet_v2'
-            });
-        }
+        // Chargement du modèle coco-ssd officiel (lite_mobilenet_v2 supporté officiellement)
+        AppState.model = await cocoSsd.load({
+            base: 'lite_mobilenet_v2'
+        });
         
         AppState.isModelLoading = false;
         updateModelStatus('ready', 'Modèle COCO-SSD prêt');
@@ -390,6 +383,11 @@ async function loadCocoSsdModel() {
         DOM.btnStartCameraOverlay.disabled = false;
         DOM.overlayBtnSpinner.classList.add('d-none');
         DOM.btnImportFile.disabled = false;
+
+        // Si une image importée est déjà présente à l'écran, lancer l'analyse maintenant
+        if (AppState.activeImportedMedia) {
+            reanalyzeActiveMedia();
+        }
         
     } catch (error) {
         console.error('Erreur lors du chargement de COCO-SSD :', error);
@@ -451,6 +449,24 @@ async function populateCameraDevices() {
 }
 
 /**
+ * Affiche l'écran de veille avec certitude (override Bootstrap)
+ */
+function showStandbyScreen() {
+    if (!DOM.cameraStandbyScreen) return;
+    DOM.cameraStandbyScreen.classList.remove('d-none');
+    DOM.cameraStandbyScreen.style.setProperty('display', 'flex', 'important');
+}
+
+/**
+ * Masque l'écran de veille avec certitude (override Bootstrap)
+ */
+function hideStandbyScreen() {
+    if (!DOM.cameraStandbyScreen) return;
+    DOM.cameraStandbyScreen.classList.add('d-none');
+    DOM.cameraStandbyScreen.style.setProperty('display', 'none', 'important');
+}
+
+/**
  * Démarre la capture de la webcam et la boucle d'inférence
  */
 async function startCamera() {
@@ -505,7 +521,7 @@ async function startCamera() {
         syncCanvasDimensions();
 
         // Mettre à jour l'interface
-        DOM.cameraStandbyScreen.style.display = 'none';
+        hideStandbyScreen();
         DOM.liveFeedTag.classList.remove('d-none');
         DOM.liveFeedTag.classList.add('d-flex');
         DOM.freezeIndicator.classList.add('d-none');
@@ -568,7 +584,7 @@ function stopCamera() {
     clearCanvas();
 
     // Mettre à jour l'interface
-    DOM.cameraStandbyScreen.style.display = 'flex';
+    showStandbyScreen();
     DOM.liveFeedTag.classList.add('d-none');
     DOM.liveFeedTag.classList.remove('d-flex');
     DOM.freezeIndicator.classList.add('d-none');
@@ -839,10 +855,10 @@ async function loadMediaItem(item) {
         DOM.webcam.style.display = 'none';
         DOM.importedImage.style.display = 'block';
         DOM.importedImage.src = item.url;
+        hideStandbyScreen();
 
         await new Promise(r => { DOM.importedImage.onload = r; });
-        DOM.canvas.width = DOM.importedImage.naturalWidth;
-        DOM.canvas.height = DOM.importedImage.naturalHeight;
+        syncCanvasDimensions();
 
         const rawPredictions = await detectWithMultiScale(DOM.importedImage);
         AppState.rawPredictionsCache = rawPredictions;
@@ -850,7 +866,6 @@ async function loadMediaItem(item) {
         AppState.latestPredictions = filtered;
         processAndRenderPredictions(filtered);
 
-        DOM.cameraStandbyScreen.style.display = 'none';
         DOM.btnClearImport.classList.remove('d-none');
         DOM.btnClearImport.classList.add('d-inline-flex');
         if (DOM.btnSaveCapture) DOM.btnSaveCapture.disabled = false;
@@ -882,11 +897,6 @@ async function reanalyzeActiveMedia() {
 async function handleFileImport(e) {
     const file = e.target.files[0];
     if (!file) return;
-
-    if (!AppState.model) {
-        showAlert('Modèle IA non encore chargé. Patientez.', 'warning', 3000);
-        return;
-    }
 
     const isImage = file.type.startsWith('image/');
     const isVideo = file.type.startsWith('video/');
@@ -920,9 +930,13 @@ async function handleFileImport(e) {
 
     if (isImage) {
         // --- Cas IMAGE ---
+        // Masquer la webcam et le standby immédiatement
         DOM.webcam.style.display = 'none';
         DOM.importedImage.style.display = 'block';
         DOM.importedImage.src = objectUrl;
+        hideStandbyScreen();
+        DOM.btnClearImport.classList.remove('d-none');
+        DOM.btnClearImport.classList.add('d-inline-flex');
 
         await new Promise((resolve) => {
             DOM.importedImage.onload = resolve;
@@ -930,25 +944,25 @@ async function handleFileImport(e) {
 
         mediaItem.dimensions = `${DOM.importedImage.naturalWidth} x ${DOM.importedImage.naturalHeight} px`;
 
-        // Synchroniser canvas sur les dimensions de l'image affichée
-        DOM.canvas.width = DOM.importedImage.naturalWidth;
-        DOM.canvas.height = DOM.importedImage.naturalHeight;
+        // Synchroniser canvas sur les dimensions réelles de l'image
+        syncCanvasDimensions();
 
-        // Lancer la détection multi-échelles sur l'image pour maximiser la détection des chaises
-        const rawPredictions = await detectWithMultiScale(DOM.importedImage);
-        AppState.rawPredictionsCache = rawPredictions;
-        const filtered = filterAndMapPredictions(rawPredictions);
-        AppState.latestPredictions = filtered;
-        processAndRenderPredictions(filtered);
+        if (AppState.model) {
+            // Lancer la détection multi-échelles sur l'image pour maximiser la détection des chaises
+            const rawPredictions = await detectWithMultiScale(DOM.importedImage);
+            AppState.rawPredictionsCache = rawPredictions;
+            const filtered = filterAndMapPredictions(rawPredictions);
+            AppState.latestPredictions = filtered;
+            processAndRenderPredictions(filtered);
+            if (DOM.btnSaveCapture) DOM.btnSaveCapture.disabled = false;
 
-        DOM.cameraStandbyScreen.style.display = 'none';
-        DOM.btnClearImport.classList.remove('d-none');
-        DOM.btnClearImport.classList.add('d-inline-flex');
-        if (DOM.btnSaveCapture) DOM.btnSaveCapture.disabled = false;
-
-        // Mettre à jour la carte d'aperçu
-        updateImportedMediaPreviewCard(mediaItem, filtered.length);
-        showAlert(`Image importée : ${file.name}. ${filtered.length} objet(s) détecté(s).`, 'success', 3000);
+            // Mettre à jour la carte d'aperçu
+            updateImportedMediaPreviewCard(mediaItem, filtered.length);
+            showAlert(`Image importée : ${file.name}. ${filtered.length} objet(s) détecté(s).`, 'success', 3000);
+        } else {
+            updateImportedMediaPreviewCard(mediaItem, 0);
+            showAlert(`Image importée : ${file.name}. Analyse automatique dès que le modèle IA est prêt...`, 'info', 3000);
+        }
 
     } else if (isVideo) {
         // --- Cas VIDÉO ---
@@ -960,6 +974,7 @@ async function handleFileImport(e) {
         DOM.webcam.muted = true;
         DOM.webcam.setAttribute('playsinline', '');
         DOM.webcam.setAttribute('webkit-playsinline', '');
+        hideStandbyScreen();
 
         await new Promise((resolve) => {
             DOM.webcam.onloadeddata = async () => {
@@ -975,7 +990,6 @@ async function handleFileImport(e) {
 
         AppState.isStreaming = true;
         AppState.isFrozen = false;
-        DOM.cameraStandbyScreen.style.display = 'none';
         DOM.liveFeedTag.classList.remove('d-none');
         DOM.liveFeedTag.classList.add('d-flex');
         DOM.btnStopCamera.disabled = false;
@@ -1024,13 +1038,11 @@ function clearImportedMedia() {
     DOM.btnClearImport.classList.remove('d-inline-flex');
     if (DOM.importedMediaPreviewCard) DOM.importedMediaPreviewCard.classList.add('d-none');
     AppState.activeImportedMedia = null;
-    DOM.btnClearImport.classList.add('d-none');
-    DOM.btnClearImport.classList.remove('d-inline-flex');
     DOM.btnStartCamera.disabled = false;
     DOM.btnStopCamera.disabled = true;
     DOM.btnFreezeFrame.disabled = true;
     if (DOM.btnSaveCapture) DOM.btnSaveCapture.disabled = true;
-    DOM.cameraStandbyScreen.style.display = 'flex';
+    showStandbyScreen();
 
     DOM.cameraStatusBadge.className = 'badge bg-secondary-subtle text-secondary border d-flex align-items-center gap-1 px-3 py-2';
     DOM.cameraStatusBadge.innerHTML = `<i class="bi bi-camera-video-off"></i> <span>Caméra arrêtée</span>`;
@@ -1070,8 +1082,26 @@ function toggleFreezeFrame() {
  * Ajuste les dimensions internes du Canvas pour correspondre à la vidéo
  */
 function syncCanvasDimensions() {
+    // Si une image statique est affichée dans le stage
+    if (DOM.importedImage && DOM.importedImage.style.display !== 'none' && DOM.importedImage.naturalWidth) {
+        DOM.canvas.width = DOM.importedImage.naturalWidth;
+        DOM.canvas.height = DOM.importedImage.naturalHeight;
+        DOM.canvas.style.position = 'absolute';
+        DOM.canvas.style.left = (DOM.importedImage.offsetLeft || 0) + 'px';
+        DOM.canvas.style.top = (DOM.importedImage.offsetTop || 0) + 'px';
+        DOM.canvas.style.width = (DOM.importedImage.clientWidth || DOM.importedImage.offsetWidth) + 'px';
+        DOM.canvas.style.height = (DOM.importedImage.clientHeight || DOM.importedImage.offsetHeight) + 'px';
+        return;
+    }
+
+    // Cas flux webcam ou vidéo
     const vw = DOM.webcam.videoWidth;
     const vh = DOM.webcam.videoHeight;
+    DOM.canvas.style.left = '0px';
+    DOM.canvas.style.top = '0px';
+    DOM.canvas.style.width = '100%';
+    DOM.canvas.style.height = '100%';
+
     if (vw && vh) {
         DOM.canvas.width = vw;
         DOM.canvas.height = vh;

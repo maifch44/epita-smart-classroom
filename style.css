@@ -108,9 +108,8 @@ body {
     box-shadow: inset 0 2px 8px rgba(0, 0, 0, 0.6);
 }
 
-/* Élément vidéo et image importée dans le stage */
-#webcam,
-#importedImage {
+/* Élément vidéo */
+#webcam {
     display: block;
     width: 100%;
     height: auto;
@@ -123,13 +122,22 @@ body {
     -webkit-transform: translateZ(0); /* Force GPU compositing sur Safari */
 }
 
-/* Canvas superposé exactement sur la vidéo */
+/* Image importée dans le stage */
+#importedImage {
+    display: none;
+    max-width: 100%;
+    max-height: 360px;
+    width: auto;
+    height: auto;
+    object-fit: contain;
+    position: relative;
+    z-index: 1;
+    margin: 0 auto;
+}
+
+/* Canvas superposé exactement sur la vidéo ou l'image */
 #canvasOverlay {
     position: absolute;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
     pointer-events: none;
     z-index: 5;
     background: transparent;   /* Explicitement transparent pour Safari */
@@ -141,6 +149,10 @@ body {
     inset: 0;
     background: radial-gradient(circle at center, #1e293b 0%, #0f172a 100%);
     z-index: 10;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
     transition: opacity 0.3s ease, visibility 0.3s ease;
 }
 
