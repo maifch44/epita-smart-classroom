@@ -35,12 +35,23 @@ export default {
 
         // GET /api/health — Vérification de l'état de l'API et de la base D1
         if (pathname === '/api/health' && request.method === 'GET') {
+          if (!env.DB) {
+            return jsonResponse({ status: 'warning', db: 'unbound', message: 'Base D1 non liée dans wrangler.toml' });
+          }
           try {
             await env.DB.prepare('SELECT 1').run();
             return jsonResponse({ status: 'ok', db: 'connected' });
           } catch (dbErr) {
             return jsonResponse({ status: 'error', db: 'disconnected', error: dbErr.message }, 500);
           }
+        }
+
+        // Vérification de la présence de D1 pour les routes de captures
+        if (!env.DB && pathname.startsWith('/api/captures')) {
+          return jsonResponse({
+            error: 'Base de données D1 non encore connectée.',
+            help: 'Créez epita-classroom-db dans Cloudflare Dashboard et renseignez database_id dans wrangler.toml.'
+          }, 503);
         }
 
         // POST /api/captures — Sauvegarde d'une capture photo et métadonnées

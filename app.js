@@ -149,7 +149,15 @@ const AppState = {
     fps: 0,
     frameCount: 0,
     lastFpsUpdateTime: performance.now(),
-    inferenceLatencyMs: 0
+    inferenceLatencyMs: 0,
+
+    // Mode Chaises Renforcé (fusionne bancs et fauteuils, seuil tolérant)
+    enhancedChairMode: true,
+    rawPredictionsCache: [],
+
+    // Historique des médias importés dans la session
+    importedMediaHistory: [],
+    activeImportedMedia: null
 };
 
 // ============================================================================
@@ -221,6 +229,22 @@ const DOM = {
     btnClearImport: document.getElementById('btnClearImport'),
     importedImage: document.getElementById('importedImage'),
 
+    // Carte d'aperçu du média importé
+    importedMediaPreviewCard: document.getElementById('importedMediaPreviewCard'),
+    importedMediaBadge: document.getElementById('importedMediaBadge'),
+    importedMediaThumbImg: document.getElementById('importedMediaThumbImg'),
+    importedMediaThumbVideo: document.getElementById('importedMediaThumbVideo'),
+    importedMediaName: document.getElementById('importedMediaName'),
+    importedMediaDimensions: document.getElementById('importedMediaDimensions'),
+    importedMediaSize: document.getElementById('importedMediaSize'),
+    importedMediaCount: document.getElementById('importedMediaCount'),
+    btnReanalyzeMedia: document.getElementById('btnReanalyzeMedia'),
+    importedMediaHistoryStrip: document.getElementById('importedMediaHistoryStrip'),
+    importedMediaHistoryList: document.getElementById('importedMediaHistoryList'),
+
+    // Mode chaises renforcé
+    enhancedChairMode: document.getElementById('enhancedChairMode'),
+
     // Alertes
     alertContainer: document.getElementById('alertContainer')
 };
@@ -265,11 +289,43 @@ function setupEventListeners() {
         AppState.confidenceThreshold = val / 100;
         DOM.confidenceValueDisplay.textContent = `${val}%`;
         
-        // Si l'image est figée, redessiner immédiatement avec le nouveau seuil
-        if (AppState.isFrozen && AppState.latestPredictions.length > 0) {
-            processAndRenderPredictions(AppState.latestPredictions);
+        // Si l'image est figée ou un média importé actif, redessiner immédiatement
+        if (AppState.rawPredictionsCache && AppState.rawPredictionsCache.length > 0) {
+            const filtered = filterAndMapPredictions(AppState.rawPredictionsCache);
+            AppState.latestPredictions = filtered;
+            processAndRenderPredictions(filtered);
+            if (AppState.activeImportedMedia) {
+                updateImportedMediaPreviewCard(AppState.activeImportedMedia, filtered.length);
+            }
         }
     });
+
+    // Option : Mode Chaises Renforcé
+    if (DOM.enhancedChairMode) {
+        DOM.enhancedChairMode.addEventListener('change', (e) => {
+            AppState.enhancedChairMode = e.target.checked;
+            showAlert(
+                AppState.enhancedChairMode 
+                    ? 'Mode Chaises Renforcé activé (bancs & fauteuils inclus comme assises).'
+                    : 'Mode Chaises Standard (détection stricte de la classe chair uniquement).',
+                'info',
+                2500
+            );
+            if (AppState.rawPredictionsCache && AppState.rawPredictionsCache.length > 0) {
+                const filtered = filterAndMapPredictions(AppState.rawPredictionsCache);
+                AppState.latestPredictions = filtered;
+                processAndRenderPredictions(filtered);
+                if (AppState.activeImportedMedia) {
+                    updateImportedMediaPreviewCard(AppState.activeImportedMedia, filtered.length);
+                }
+            }
+        });
+    }
+
+    // Bouton réanalyser le média importé
+    if (DOM.btnReanalyzeMedia) {
+        DOM.btnReanalyzeMedia.addEventListener('click', reanalyzeActiveMedia);
+    }
 
     // Bouton de réinitialisation de la configuration théorique
     DOM.btnResetConfig.addEventListener('click', () => {
@@ -524,6 +580,142 @@ function stopCamera() {
 // ============================================================================
 // IMPORT PHOTO / VIDÉO (Fonctionnalité ajoutée)
 // ============================================================================
+// 6. GESTION DES PRÉDICTIONS & MODE CHAISES RENFORCÉ
+// ============================================================================
+
+/**
+ * Filtre et mappe les prédictions COCO-SSD en appliquant les règles métier
+ * et la compensation d'occlusion pour les chaises.
+ */
+function filterAndMapPredictions(rawPredictions) {
+    if (!rawPredictions || !Array.isArray(rawPredictions)) return [];
+
+    return rawPredictions.map(p => {
+        let pClass = p.class;
+        // Mode chaises renforcé : si banc d'amphi ou fauteuil, assimiler à une chaise
+        if (AppState.enhancedChairMode && (pClass === 'bench' || pClass === 'couch')) {
+            pClass = 'chair';
+        }
+        return { ...p, class: pClass, originalClass: p.class };
+    }).filter(p => {
+        // En mode renforcé, seuil plus souple sur les chaises pour compenser l'occlusion sous les tables
+        if (AppState.enhancedChairMode && p.class === 'chair') {
+            const chairThreshold = Math.max(0.20, AppState.confidenceThreshold - 0.15);
+            return p.score >= chairThreshold;
+        }
+        return p.score >= AppState.confidenceThreshold;
+    });
+}
+
+function formatBytes(bytes) {
+    if (!bytes || bytes === 0) return '0 Ko';
+    const k = 1024;
+    const sizes = ['Octets', 'Ko', 'Mo', 'Go'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+}
+
+/**
+ * Met à jour la carte d'aperçu du média importé
+ */
+function updateImportedMediaPreviewCard(mediaItem, detectionCount) {
+    if (!DOM.importedMediaPreviewCard) return;
+
+    DOM.importedMediaPreviewCard.classList.remove('d-none');
+    DOM.importedMediaBadge.textContent = mediaItem.type === 'image' ? 'Photo' : 'Vidéo';
+    DOM.importedMediaName.textContent = mediaItem.name;
+    DOM.importedMediaDimensions.textContent = mediaItem.dimensions || '- x - px';
+    DOM.importedMediaSize.textContent = mediaItem.size || '- Ko';
+    DOM.importedMediaCount.textContent = `${detectionCount} objet(s) détecté(s)`;
+
+    if (mediaItem.type === 'image') {
+        DOM.importedMediaThumbImg.src = mediaItem.url;
+        DOM.importedMediaThumbImg.classList.remove('d-none');
+        DOM.importedMediaThumbVideo.classList.add('d-none');
+    } else {
+        DOM.importedMediaThumbVideo.src = mediaItem.url;
+        DOM.importedMediaThumbVideo.classList.remove('d-none');
+        DOM.importedMediaThumbImg.classList.add('d-none');
+    }
+
+    renderMediaHistoryStrip();
+}
+
+/**
+ * Affiche la bande de miniatures des médias récemment importés
+ */
+function renderMediaHistoryStrip() {
+    if (!DOM.importedMediaHistoryStrip || !DOM.importedMediaHistoryList) return;
+    if (AppState.importedMediaHistory.length <= 1) {
+        DOM.importedMediaHistoryStrip.classList.add('d-none');
+        return;
+    }
+
+    DOM.importedMediaHistoryStrip.classList.remove('d-none');
+    DOM.importedMediaHistoryList.innerHTML = '';
+
+    AppState.importedMediaHistory.forEach(item => {
+        const div = document.createElement('div');
+        div.className = `thumb-history-item ${AppState.activeImportedMedia?.id === item.id ? 'active' : ''}`;
+        div.title = `${item.name} (${item.type === 'image' ? 'Photo' : 'Vidéo'})`;
+        if (item.type === 'image') {
+            div.innerHTML = `<img src="${item.url}" alt="${item.name}">`;
+        } else {
+            div.innerHTML = `<video src="${item.url}" muted></video>`;
+        }
+        div.addEventListener('click', () => loadMediaItem(item));
+        DOM.importedMediaHistoryList.appendChild(div);
+    });
+}
+
+/**
+ * Charge un média issu de l'historique de session
+ */
+async function loadMediaItem(item) {
+    AppState.activeImportedMedia = item;
+    clearCanvas();
+
+    if (item.type === 'image') {
+        if (AppState.isStreaming) stopCamera();
+        DOM.webcam.style.display = 'none';
+        DOM.importedImage.style.display = 'block';
+        DOM.importedImage.src = item.url;
+
+        await new Promise(r => { DOM.importedImage.onload = r; });
+        DOM.canvas.width = DOM.importedImage.naturalWidth;
+        DOM.canvas.height = DOM.importedImage.naturalHeight;
+
+        const rawPredictions = await AppState.model.detect(DOM.importedImage);
+        AppState.rawPredictionsCache = rawPredictions;
+        const filtered = filterAndMapPredictions(rawPredictions);
+        AppState.latestPredictions = filtered;
+        processAndRenderPredictions(filtered);
+
+        DOM.cameraStandbyScreen.style.display = 'none';
+        DOM.btnClearImport.classList.remove('d-none');
+        DOM.btnClearImport.classList.add('d-inline-flex');
+        if (DOM.btnSaveCapture) DOM.btnSaveCapture.disabled = false;
+        updateImportedMediaPreviewCard(item, filtered.length);
+        showAlert(`Média "${item.name}" chargé depuis l'historique.`, 'info', 2000);
+    }
+}
+
+/**
+ * Réanalyse le média actif (utilisé lors du changement de seuil ou de mode chaises)
+ */
+async function reanalyzeActiveMedia() {
+    if (!AppState.activeImportedMedia) return;
+
+    if (AppState.activeImportedMedia.type === 'image') {
+        const rawPredictions = await AppState.model.detect(DOM.importedImage);
+        AppState.rawPredictionsCache = rawPredictions;
+        const filtered = filterAndMapPredictions(rawPredictions);
+        AppState.latestPredictions = filtered;
+        processAndRenderPredictions(filtered);
+        updateImportedMediaPreviewCard(AppState.activeImportedMedia, filtered.length);
+        showAlert(`Réanalyse terminée : ${filtered.length} objet(s) détecté(s).`, 'success', 2000);
+    }
+}
 
 /**
  * Gère l'import d'une image ou vidéo locale et lance la détection dessus
@@ -551,6 +743,22 @@ async function handleFileImport(e) {
     const objectUrl = URL.createObjectURL(file);
     clearCanvas();
 
+    const mediaItem = {
+        id: Date.now(),
+        file,
+        name: file.name,
+        type: isImage ? 'image' : 'video',
+        url: objectUrl,
+        size: formatBytes(file.size),
+        dimensions: ''
+    };
+
+    AppState.activeImportedMedia = mediaItem;
+    // Ajouter à l'historique s'il n'existe pas déjà
+    if (!AppState.importedMediaHistory.some(m => m.name === mediaItem.name && m.size === mediaItem.size)) {
+        AppState.importedMediaHistory.push(mediaItem);
+    }
+
     if (isImage) {
         // --- Cas IMAGE ---
         DOM.webcam.style.display = 'none';
@@ -561,14 +769,16 @@ async function handleFileImport(e) {
             DOM.importedImage.onload = resolve;
         });
 
+        mediaItem.dimensions = `${DOM.importedImage.naturalWidth} x ${DOM.importedImage.naturalHeight} px`;
+
         // Synchroniser canvas sur les dimensions de l'image affichée
-        const rect = DOM.importedImage.getBoundingClientRect();
         DOM.canvas.width = DOM.importedImage.naturalWidth;
         DOM.canvas.height = DOM.importedImage.naturalHeight;
 
         // Lancer la détection sur l'image
-        const predictions = await AppState.model.detect(DOM.importedImage);
-        const filtered = predictions.filter(p => p.score >= AppState.confidenceThreshold);
+        const rawPredictions = await AppState.model.detect(DOM.importedImage);
+        AppState.rawPredictionsCache = rawPredictions;
+        const filtered = filterAndMapPredictions(rawPredictions);
         AppState.latestPredictions = filtered;
         processAndRenderPredictions(filtered);
 
@@ -576,7 +786,10 @@ async function handleFileImport(e) {
         DOM.btnClearImport.classList.remove('d-none');
         DOM.btnClearImport.classList.add('d-inline-flex');
         if (DOM.btnSaveCapture) DOM.btnSaveCapture.disabled = false;
-        showAlert(`Image importée. ${filtered.length} objet(s) détecté(s) avec le seuil actuel.`, 'success', 3000);
+
+        // Mettre à jour la carte d'aperçu
+        updateImportedMediaPreviewCard(mediaItem, filtered.length);
+        showAlert(`Image importée : ${file.name}. ${filtered.length} objet(s) détecté(s).`, 'success', 3000);
 
     } else if (isVideo) {
         // --- Cas VIDÉO ---
@@ -595,6 +808,8 @@ async function handleFileImport(e) {
                 resolve();
             };
         });
+
+        mediaItem.dimensions = `${DOM.webcam.videoWidth} x ${DOM.webcam.videoHeight} px`;
 
         await new Promise(r => setTimeout(r, 150));
         syncCanvasDimensions();
@@ -617,7 +832,9 @@ async function handleFileImport(e) {
         AppState.frameCount = 0;
         requestAnimationFrame(detectionLoop);
 
-        showAlert('Vidéo importée. Détection IA en cours sur le fichier.', 'info', 3000);
+        // Mettre à jour la carte d'aperçu
+        updateImportedMediaPreviewCard(mediaItem, 0);
+        showAlert(`Vidéo importée : ${file.name}. Détection IA en cours...`, 'info', 3000);
     }
 
     // Réinitialiser le champ file pour permettre de réimporter le même fichier
@@ -644,6 +861,10 @@ function clearImportedMedia() {
     DOM.importedImage.style.display = 'none';
     DOM.importedImage.src = '';
     DOM.webcam.style.display = 'none';
+    DOM.btnClearImport.classList.add('d-none');
+    DOM.btnClearImport.classList.remove('d-inline-flex');
+    if (DOM.importedMediaPreviewCard) DOM.importedMediaPreviewCard.classList.add('d-none');
+    AppState.activeImportedMedia = null;
     DOM.btnClearImport.classList.add('d-none');
     DOM.btnClearImport.classList.remove('d-inline-flex');
     DOM.btnStartCamera.disabled = false;
@@ -726,10 +947,11 @@ async function detectionLoop() {
         try {
             // Inférence par COCO-SSD
             const rawPredictions = await AppState.model.detect(DOM.webcam);
+            AppState.rawPredictionsCache = rawPredictions;
             AppState.inferenceLatencyMs = Math.round(performance.now() - startTime);
 
-            // Filtrage par seuil de confiance paramétrable
-            const filteredPredictions = rawPredictions.filter(p => p.score >= AppState.confidenceThreshold);
+            // Filtrage par seuil de confiance et mode chaises renforcé
+            const filteredPredictions = filterAndMapPredictions(rawPredictions);
             AppState.latestPredictions = filteredPredictions;
 
             // Traitement des boîtes englobantes et mise à jour de l'UI

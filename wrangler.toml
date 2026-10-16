@@ -2,10 +2,19 @@ name = "epita-smart-classroom"
 main = "worker.js"
 compatibility_date = "2024-01-01"
 
-[[d1_databases]]
-binding = "DB"
-database_name = "epita-classroom-db"
-database_id = "placeholder-replace-after-creation"
+# ==============================================================================
+# CONFIGURATION CLOUDFLARE D1 (SQLITE)
+# Pour activer D1 :
+# 1. Allez sur Cloudflare Dashboard -> Storage & Databases -> D1 SQL Database
+# 2. Cliquez sur "Create Database" -> nommez-la "epita-classroom-db"
+# 3. Copiez le "Database ID" (UUID) et remplacez la ligne ci-dessous
+# 4. Décommentez le bloc [[d1_databases]]
+# ==============================================================================
+
+# [[d1_databases]]
+# binding = "DB"
+# database_name = "epita-classroom-db"
+# database_id = "VOTRE_DATABASE_ID_ICI"
 
 [site]
 bucket = "./"

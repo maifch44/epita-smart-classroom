@@ -183,6 +183,40 @@
                             </div>
                         </div>
 
+                        <!-- Carte d'Aperçu du Média Importé (Photo / Vidéo) -->
+                        <div id="importedMediaPreviewCard" class="mt-3 p-3 bg-white rounded-3 border d-none">
+                            <div class="d-flex align-items-center justify-content-between mb-2">
+                                <h6 class="fw-bold mb-0 fs-sm d-flex align-items-center gap-2">
+                                    <i class="bi bi-file-earmark-image text-info"></i>
+                                    <span>Média actif en cours d'analyse</span>
+                                </h6>
+                                <span id="importedMediaBadge" class="badge bg-primary-subtle text-primary border fs-xs">Photo</span>
+                            </div>
+                            <div class="d-flex align-items-center gap-3">
+                                <div class="position-relative border rounded overflow-hidden" style="width: 80px; height: 60px; background: #1e293b; flex-shrink: 0;">
+                                    <img id="importedMediaThumbImg" src="" alt="Aperçu" style="width: 100%; height: 100%; object-fit: cover;" class="d-none">
+                                    <video id="importedMediaThumbVideo" style="width: 100%; height: 100%; object-fit: cover;" class="d-none" muted></video>
+                                </div>
+                                <div class="flex-grow-1 min-w-0">
+                                    <p id="importedMediaName" class="fw-semibold text-truncate mb-0 fs-sm">nom_fichier.jpg</p>
+                                    <p class="text-muted fs-xs mb-0">
+                                        <span id="importedMediaDimensions">- x - px</span> &bull; 
+                                        <span id="importedMediaSize">- Ko</span>
+                                    </p>
+                                    <p id="importedMediaCount" class="text-success fs-xs fw-semibold mb-0">0 détections</p>
+                                </div>
+                                <button id="btnReanalyzeMedia" class="btn btn-outline-primary btn-sm d-inline-flex align-items-center gap-1" title="Réanalyser">
+                                    <i class="bi bi-arrow-repeat"></i> <span class="d-none d-sm-inline">Réanalyser</span>
+                                </button>
+                            </div>
+
+                            <!-- Galerie des médias récemment importés (miniatures) -->
+                            <div id="importedMediaHistoryStrip" class="mt-2 pt-2 border-top d-none">
+                                <span class="fs-xs text-muted d-block mb-1">Historique des fichiers importés :</span>
+                                <div id="importedMediaHistoryList" class="d-flex gap-2 overflow-x-auto pb-1"></div>
+                            </div>
+                        </div>
+
                         <!-- Paramétrage du seuil de confiance (Slider Fonctionnalité B) -->
                         <div class="mt-3 p-3 bg-white rounded-3 border">
                             <div class="d-flex justify-content-between align-items-center mb-1">
@@ -192,10 +226,19 @@
                                 <span id="confidenceValueDisplay" class="badge bg-primary font-monospace fs-6 px-2 py-1">50%</span>
                             </div>
                             <input type="range" class="form-range" id="confidenceRange" min="15" max="95" step="5" value="50">
-                            <div class="d-flex justify-content-between text-muted fs-xs">
-                                <span>15% (Plus sensible, risque de faux positifs)</span>
+                            <div class="d-flex justify-content-between text-muted fs-xs mb-2">
+                                <span>15% (Sensible)</span>
                                 <span>50% (Recommandé)</span>
-                                <span>95% (Très strict)</span>
+                                <span>95% (Strict)</span>
+                            </div>
+
+                            <!-- Option spéciale : Détection renforcée des chaises -->
+                            <div class="form-check form-switch pt-2 border-top">
+                                <input class="form-check-input" type="checkbox" role="switch" id="enhancedChairMode" checked>
+                                <label class="form-check-label fs-xs fw-semibold text-secondary" for="enhancedChairMode">
+                                    <i class="bi bi-chair text-primary"></i> <strong>Mode Chaises Renforcé :</strong> inclut bancs d'amphi (bench) et assises partielles (couch)
+                                </label>
+                                <div class="text-muted fs-xs ms-1">Active la compensation d'occlusion lorsque les pieds ou l'assise sont masqués par les tables.</div>
                             </div>
                         </div>
 
