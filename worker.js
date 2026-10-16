@@ -54,6 +54,24 @@ export default {
           }, 503);
         }
 
+        // Initialisation automatique du schéma SQLite D1 si non existant
+        if (env.DB && pathname.startsWith('/api/captures')) {
+          try {
+            await env.DB.prepare(`
+              CREATE TABLE IF NOT EXISTS captures (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp TEXT NOT NULL,
+                image_data TEXT NOT NULL,
+                detections_json TEXT NOT NULL DEFAULT '[]',
+                audit_summary_json TEXT NOT NULL DEFAULT '{}',
+                created_at TEXT NOT NULL DEFAULT (datetime('now'))
+              )
+            `).run();
+          } catch(e) {
+            console.warn('Init table captures:', e);
+          }
+        }
+
         // POST /api/captures — Sauvegarde d'une capture photo et métadonnées
         if (pathname === '/api/captures' && request.method === 'POST') {
           const body = await request.json();
