@@ -2,10 +2,11 @@ name = "epita-smart-classroom"
 main = "worker.js"
 compatibility_date = "2024-01-01"
 
+[assets]
+directory = "./"
+binding = "ASSETS"
+
 [[d1_databases]]
 binding = "DB"
 database_name = "epita-classroom-db"
 database_id = "9b1d74e5-dcd4-4c1b-b6be-3c0800d55d70"
-
-[site]
-bucket = "./"

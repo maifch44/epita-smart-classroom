@@ -3,6 +3,8 @@
  * Backend D1 (SQLite) pour la persistance des audits et captures photo
  */
 
+import { STATIC_FILES } from './assets_bundle.js';
+
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
@@ -142,9 +144,31 @@ export default {
       }
     }
 
-    // En l'absence de route API, servir les assets statiques (frontend)
+    // 1. Tenter d'utiliser env.ASSETS (Cloudflare Workers Static Assets natif)
     if (env.ASSETS) {
-      return env.ASSETS.fetch(request);
+      try {
+        const response = await env.ASSETS.fetch(request);
+        if (response.status !== 404) {
+          return response;
+        }
+      } catch (err) {
+        console.warn('env.ASSETS failed, using embedded fallback:', err);
+      }
+    }
+
+    // 2. Fallback de secours autonome : servir depuis le bundle embarqué
+    const rawPath = url.pathname === '' || url.pathname === '/' ? '/index.html' : url.pathname;
+    const file = STATIC_FILES[rawPath] || STATIC_FILES['/index.html'];
+
+    if (file) {
+      return new Response(file.content, {
+        status: 200,
+        headers: {
+          'Content-Type': file.type,
+          'Cache-Control': 'public, max-age=3600',
+          ...corsHeaders,
+        },
+      });
     }
 
     return new Response('Not Found', { status: 404 });
