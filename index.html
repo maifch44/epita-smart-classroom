@@ -117,7 +117,7 @@
                             <video id="webcam" playsinline webkit-playsinline muted autoplay></video>
                             <canvas id="canvasOverlay"></canvas>
                             <!-- Image statique importée (affichée à la place du flux quand actif) -->
-                            <img id="importedImage" style="display:none; width:100%; height:auto; max-height:520px; object-fit:contain; position:relative; z-index:2;" alt="Image importée" />
+                            <img id="importedImage" style="display:none; width:100%; height:auto; max-height:360px; object-fit:contain; position:relative; z-index:2;" alt="Image importée" />
                             
                             <!-- Écran d'accueil quand la caméra est éteinte -->
                             <div id="cameraStandbyScreen" class="camera-overlay-placeholder d-flex flex-column align-items-center justify-content-center text-center p-4">
@@ -183,9 +183,9 @@
                             </div>
                         </div>
 
-                        <!-- Carte d'Aperçu du Média Importé (Photo / Vidéo) Grand Format & Détail -->
+                        <!-- Carte d'Aperçu du Média Importé (Photo / Vidéo) Format Équilibré & Détail -->
                         <div id="importedMediaPreviewCard" class="mt-3 p-3 bg-white rounded-3 border d-none shadow-sm">
-                            <div class="d-flex align-items-center justify-content-between mb-3 pb-2 border-bottom">
+                            <div class="d-flex align-items-center justify-content-between mb-2 pb-2 border-bottom">
                                 <div class="d-flex align-items-center gap-2">
                                     <i class="bi bi-file-earmark-image fs-5 text-primary"></i>
                                     <div>
@@ -202,30 +202,35 @@
                                 </div>
                             </div>
 
-                            <!-- Grand aperçu visuel du média -->
-                            <div class="imported-media-large-container mb-3 shadow-inner">
-                                <img id="importedMediaThumbImg" src="" alt="Grand Aperçu" class="d-none">
-                                <video id="importedMediaThumbVideo" class="d-none" controls playsinline muted></video>
-                                <div class="position-absolute bottom-0 start-0 m-2 badge bg-dark bg-opacity-75 text-white font-monospace fs-xs">
-                                    <span id="importedMediaDimensions">- x - px</span> &bull; <span id="importedMediaSize">- Ko</span>
+                            <!-- Contenu côte-à-côte : Aperçu à gauche + Liste des détections à droite -->
+                            <div class="row g-3 align-items-stretch">
+                                <!-- Colonne Gauche : Aperçu compact et net -->
+                                <div class="col-md-5 col-sm-6">
+                                    <div class="imported-media-large-container h-100 shadow-inner">
+                                        <img id="importedMediaThumbImg" src="" alt="Aperçu" class="d-none">
+                                        <video id="importedMediaThumbVideo" class="d-none" controls playsinline muted></video>
+                                        <div class="position-absolute bottom-0 start-0 m-1 badge bg-dark bg-opacity-75 text-white font-monospace fs-xs">
+                                            <span id="importedMediaDimensions">- x - px</span>
+                                        </div>
+                                    </div>
                                 </div>
-                            </div>
 
-                            <!-- Section Détail des Objets Détectés sur ce média -->
-                            <div class="mb-3">
-                                <div class="d-flex align-items-center justify-content-between mb-2">
-                                    <span class="fw-semibold fs-xs text-uppercase text-secondary">
-                                        <i class="bi bi-list-check"></i> Détail de ce qu'il détecte sur ce média :
-                                    </span>
-                                    <span id="importedMediaCategorySummary" class="text-muted fs-xs">0 catégorie trouvée</span>
-                                </div>
-                                <div id="importedMediaDetectionsList" class="d-flex flex-column gap-2 overflow-y-auto p-2 bg-light rounded border" style="max-height: 220px;">
-                                    <span class="text-muted small p-2">Aucun objet détecté pour l'instant.</span>
+                                <!-- Colonne Droite : Liste détaillée de chaque objet détecté -->
+                                <div class="col-md-7 col-sm-6 d-flex flex-column">
+                                    <div class="d-flex align-items-center justify-content-between mb-1">
+                                        <span class="fw-semibold fs-xs text-uppercase text-secondary">
+                                            <i class="bi bi-list-check"></i> Détections détaillées :
+                                        </span>
+                                        <span id="importedMediaCategorySummary" class="text-muted fs-xs">0 catégorie</span>
+                                    </div>
+                                    <div id="importedMediaDetectionsList" class="d-flex flex-column gap-1 overflow-y-auto p-2 bg-light rounded border flex-grow-1" style="max-height: 180px; min-height: 120px;">
+                                        <span class="text-muted small p-2">Aucun objet détecté pour l'instant.</span>
+                                    </div>
                                 </div>
                             </div>
 
                             <!-- Galerie des médias récemment importés (miniatures) -->
-                            <div id="importedMediaHistoryStrip" class="pt-2 border-top d-none">
+                            <div id="importedMediaHistoryStrip" class="pt-2 mt-2 border-top d-none">
                                 <span class="fs-xs text-muted d-block mb-1">Historique des fichiers importés (cliquez pour basculer) :</span>
                                 <div id="importedMediaHistoryList" class="d-flex gap-2 overflow-x-auto pb-1"></div>
                             </div>
@@ -237,12 +242,12 @@
                                 <label for="confidenceRange" class="form-label mb-0 fw-semibold fs-sm d-flex align-items-center gap-1">
                                     <i class="bi bi-sliders2 text-primary"></i> Seuil de confiance minimal :
                                 </label>
-                                <span id="confidenceValueDisplay" class="badge bg-primary font-monospace fs-6 px-2 py-1">50%</span>
+                                <span id="confidenceValueDisplay" class="badge bg-primary font-monospace fs-6 px-2 py-1">35%</span>
                             </div>
-                            <input type="range" class="form-range" id="confidenceRange" min="15" max="95" step="5" value="50">
+                            <input type="range" class="form-range" id="confidenceRange" min="15" max="95" step="5" value="35">
                             <div class="d-flex justify-content-between text-muted fs-xs mb-2">
-                                <span>15% (Sensible)</span>
-                                <span>50% (Recommandé)</span>
+                                <span>15% (Très sensible)</span>
+                                <span>35% (Recommandé chaises/salle)</span>
                                 <span>95% (Strict)</span>
                             </div>
 

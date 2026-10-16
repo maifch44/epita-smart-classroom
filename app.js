@@ -134,7 +134,7 @@ const AppState = {
     isFrozen: false,
     mediaStream: null,
     animationFrameId: null,
-    confidenceThreshold: 0.50, // Seuil par défaut à 50%
+    confidenceThreshold: 0.35, // Seuil par défaut à 35% (recommandé pour mobilier de classe avec occlusions)
     
     // Règles d'audit actives (clonées au démarrage)
     auditRules: JSON.parse(JSON.stringify(DEFAULT_AUDIT_RULES)),
@@ -370,10 +370,17 @@ async function loadCocoSsdModel() {
     try {
         updateModelStatus('loading', 'Chargement du modèle COCO-SSD...');
         
-        // Chargement du modèle coco-ssd officiel (MobileNetLite v2 par défaut)
-        AppState.model = await cocoSsd.load({
-            base: 'lite_mobilenet_v2' // Très rapide et optimisé pour le temps réel en navigateur
-        });
+        // Chargement du modèle coco-ssd (mobilenet_v2 pour meilleure acuité sur les chaises, fallback lite)
+        try {
+            AppState.model = await cocoSsd.load({
+                base: 'mobilenet_v2' // Résolution et mAP supérieures pour petits objets / occlusions
+            });
+        } catch (loadErr) {
+            console.warn('Fallback vers lite_mobilenet_v2 :', loadErr);
+            AppState.model = await cocoSsd.load({
+                base: 'lite_mobilenet_v2'
+            });
+        }
         
         AppState.isModelLoading = false;
         updateModelStatus('ready', 'Modèle COCO-SSD prêt');
@@ -604,13 +611,109 @@ function filterAndMapPredictions(rawPredictions) {
         }
         return { ...p, class: pClass, originalClass: p.class };
     }).filter(p => {
-        // En mode renforcé, seuil plus souple sur les chaises pour compenser l'occlusion sous les tables
+        // En mode renforcé, seuil très tolérant pour les chaises (occlusion forte dans les salles de classe)
         if (AppState.enhancedChairMode && p.class === 'chair') {
-            const chairThreshold = Math.max(0.20, AppState.confidenceThreshold - 0.15);
+            const chairThreshold = Math.max(0.12, AppState.confidenceThreshold - 0.28);
             return p.score >= chairThreshold;
         }
         return p.score >= AppState.confidenceThreshold;
     });
+}
+
+/**
+ * Détection multi-échelles (Tiling) pour capturer les chaises distantes ou partiellement masquées
+ */
+async function detectWithMultiScale(imageElement) {
+    if (!AppState.model || !imageElement) return [];
+
+    // 1. Détection globale sur l'image entière
+    let allPredictions = await AppState.model.detect(imageElement);
+
+    const nw = imageElement.naturalWidth || imageElement.videoWidth || imageElement.width;
+    const nh = imageElement.naturalHeight || imageElement.videoHeight || imageElement.height;
+
+    // Si l'image a une résolution suffisante, découper 3 sous-zones pour grossir les chaises de rangées arrière
+    if (nw >= 480 && nh >= 360) {
+        try {
+            const offCanvas = document.createElement('canvas');
+            const offCtx = offCanvas.getContext('2d');
+
+            // Zones ciblées où se concentrent les rangées de tables et chaises
+            const patches = [
+                { x: 0, y: 0, w: Math.round(nw * 0.58), h: nh },
+                { x: Math.round(nw * 0.42), y: 0, w: Math.round(nw * 0.58), h: nh },
+                { x: 0, y: Math.round(nh * 0.25), w: nw, h: Math.round(nh * 0.75) }
+            ];
+
+            for (const patch of patches) {
+                offCanvas.width = patch.w;
+                offCanvas.height = patch.h;
+                offCtx.drawImage(imageElement, patch.x, patch.y, patch.w, patch.h, 0, 0, patch.w, patch.h);
+
+                const patchPreds = await AppState.model.detect(offCanvas);
+                // Réajuster les coordonnées de la boîte englobante vers l'image complète
+                patchPreds.forEach(p => {
+                    const [px, py, pw, ph] = p.bbox;
+                    allPredictions.push({
+                        ...p,
+                        bbox: [px + patch.x, py + patch.y, pw, ph]
+                    });
+                });
+            }
+
+            // Supprimer les détections redondantes avec Non-Maximum Suppression
+            allPredictions = applyNms(allPredictions, 0.42);
+        } catch (err) {
+            console.warn('Tiling multi-scale error:', err);
+        }
+    }
+
+    return allPredictions;
+}
+
+/**
+ * Non-Maximum Suppression (NMS) pour fusionner les boîtes englobantes qui se chevauchent
+ */
+function applyNms(predictions, iouThreshold = 0.42) {
+    if (!predictions || predictions.length <= 1) return predictions || [];
+    const sorted = [...predictions].sort((a, b) => b.score - a.score);
+    const selected = [];
+
+    while (sorted.length > 0) {
+        const best = sorted.shift();
+        selected.push(best);
+
+        for (let i = sorted.length - 1; i >= 0; i--) {
+            const candidate = sorted[i];
+            const isSameClass = best.class === candidate.class;
+            if (isSameClass && calculateIoU(best.bbox, candidate.bbox) > iouThreshold) {
+                sorted.splice(i, 1);
+            }
+        }
+    }
+    return selected;
+}
+
+/**
+ * Calcul du ratio d'Intersection over Union (IoU) entre deux boîtes englobantes
+ */
+function calculateIoU(bbox1, bbox2) {
+    const [x1, y1, w1, h1] = bbox1;
+    const [x2, y2, w2, h2] = bbox2;
+
+    const xi1 = Math.max(x1, x2);
+    const yi1 = Math.max(y1, y2);
+    const xi2 = Math.min(x1 + w1, x2 + w2);
+    const yi2 = Math.min(y1 + h1, y2 + h2);
+
+    const interArea = Math.max(0, xi2 - xi1) * Math.max(0, yi2 - yi1);
+    if (interArea === 0) return 0;
+
+    const area1 = w1 * h1;
+    const area2 = w2 * h2;
+    const unionArea = area1 + area2 - interArea;
+
+    return unionArea > 0 ? interArea / unionArea : 0;
 }
 
 function formatBytes(bytes) {
@@ -741,7 +844,7 @@ async function loadMediaItem(item) {
         DOM.canvas.width = DOM.importedImage.naturalWidth;
         DOM.canvas.height = DOM.importedImage.naturalHeight;
 
-        const rawPredictions = await AppState.model.detect(DOM.importedImage);
+        const rawPredictions = await detectWithMultiScale(DOM.importedImage);
         AppState.rawPredictionsCache = rawPredictions;
         const filtered = filterAndMapPredictions(rawPredictions);
         AppState.latestPredictions = filtered;
@@ -763,7 +866,7 @@ async function reanalyzeActiveMedia() {
     if (!AppState.activeImportedMedia) return;
 
     if (AppState.activeImportedMedia.type === 'image') {
-        const rawPredictions = await AppState.model.detect(DOM.importedImage);
+        const rawPredictions = await detectWithMultiScale(DOM.importedImage);
         AppState.rawPredictionsCache = rawPredictions;
         const filtered = filterAndMapPredictions(rawPredictions);
         AppState.latestPredictions = filtered;
@@ -831,8 +934,8 @@ async function handleFileImport(e) {
         DOM.canvas.width = DOM.importedImage.naturalWidth;
         DOM.canvas.height = DOM.importedImage.naturalHeight;
 
-        // Lancer la détection sur l'image
-        const rawPredictions = await AppState.model.detect(DOM.importedImage);
+        // Lancer la détection multi-échelles sur l'image pour maximiser la détection des chaises
+        const rawPredictions = await detectWithMultiScale(DOM.importedImage);
         AppState.rawPredictionsCache = rawPredictions;
         const filtered = filterAndMapPredictions(rawPredictions);
         AppState.latestPredictions = filtered;
